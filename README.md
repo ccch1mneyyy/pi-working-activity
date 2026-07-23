@@ -1,72 +1,132 @@
 # pi-working-activity
 
-一个让 pi CLI 的 Working 行「活起来」的扩展：真实工具活动 + 俏皮中文文案 + 模型自述 + 稀有彩蛋清仓 + 上下文预警。
+> A lively Working-line extension for [pi](https://github.com/earendil-works/pi-coding-agent).  
+> Real tool activity, playful Chinese phrases, rare rainbow easter eggs, model self-narration, and context-usage warnings — all in your terminal's status bar.
 
-> A lively Working-line extension for [pi](https://github.com/earendil-works/pi-coding-agent): real tool activity, playful phrases, model self-narration, rare rainbow easter eggs, and context-usage warning.
+## Features
 
-## 功能一览
+### 🛠 Real Tool Activity
+Watches `tool_execution_start` and `tool_execution_end` events. The Working line shows exactly what your agent is doing right now — no fake spinner verbs.
 
-| 功能 | 说明 |
-|------|------|
-| 🛠 真实工具活动 | 监听 `tool_execution_start/end`，Working 行实时显示正在跑的工具（翻翻 xxx / 改改 xxx / 跑命令 xxx） |
-| 💬 俏皮文案池 | 思考时轮换 60+ 条口语化短句（嗯… / 让我想想 / 盘一下），等待首个 token 时另有独立文案池 |
-| ⏵ 模型自述 | 开启后模型会在每步开始时用一句话说明自己在做什么，Working 行直接展示（默认关） |
-| 🎰 稀有彩蛋 | 约 1/150 概率蹦出「SSR！/ 金色传说 / 一发入魂」，**七彩流光加粗**滚动 7.5 秒 |
-| 📊 配速显示 | 思考中显示总耗时（`· 总1m23s`），结束后弹总时间通知 |
-| ⚠ 上下文预警 | context 用量超过阈值（默认 80%）时 Working 行亮黄色警告 |
-| 🔥 连击检测 | 连续 5+ 工具触发「火力全开×N」，并行工具也算 |
-| ⏱ 慢工具预警 | 单工具超 30s 提示「这个有点慢」 |
-| 🌙 深夜/周末彩蛋 | 0–6 点混入深夜文案，周末首次会话有问候 |
-| 🎨 30+ 动画预设 | Braille / Claude 原版帧 / 月亮 / 彗星… `/activity` 交互选择 |
+| Tool | Working line |
+|------|-------------|
+| `read` | `翻翻 config.yml` |
+| `edit` | `改改 working-activity.ts` |
+| `bash` | `跑命令 npm test` |
+| `grep` | `搜搜 NARRATE_MIN_MS` |
+| `web_search` | `上网搜搜` |
+| `mcp` | `喊外援` |
 
-## 安装
+Fast tools (under 1.5s) are queued and replayed one by one so you can actually see them — the last one sticks for 3 seconds. Slow tools show elapsed time live.
+
+### 💬 Playful Phrase Pools
+When the model is thinking, the Working line cycles through 60+ short, colloquial Chinese phrases — no stiff "Processing..." here.
+
+```
+嗯… → 让我想想 → 盘一下 → 在想了 → 快了快了 → 唔… → 喵 → 诶嘿
+```
+
+Thinking too long? Phrases change progressively:
+- **30s**: `转圈圈…` `等等`
+- **1min**: `还在努力…` `这个有点绕…`
+- **5min**: `还没放弃…` `这题真的硬…`
+
+### ⏵ Model Self-Narration (optional)
+Toggle `narrate: true` in config. The extension injects a convention into the model: write a `⏵ short status line` before each step. The extension parses streaming output and displays it on the Working line.
+
+```
+⏵ 修复登录页样式    →   Working line: "修复登录页样式 · 改改 login.tsx"
+⏵ 查一下报错原因   →   Working line: "查一下报错原因 · 搜搜 error.log"
+```
+
+### 🎰 Rare Rainbow Easter Eggs
+At a 1/150 chance (roughly every 6–7 minutes of thinking), the Working line explodes into **bold rainbow text** that stays for 7.5 seconds.
+
+```
+SSR！ 金色传说  暴击了  欧皇时刻  一发入魂  你发现我了  ✨
+```
+
+Each character gets its own hue, scrolling at 14°/frame with 95% saturation. It's absurd. It's glorious.
+
+### 📊 Live Timing
+- During thinking: `嗯… · 总1m23s`
+- During tools: `改改 file.ts · 3s`
+- After completion: `⏱ 总用时 1m23s · 4 工具 · 想12s 干11s` (notification below the conversation)
+
+### ⚠ Context-Window Warning
+Checks context usage every 3 seconds. When usage exceeds the threshold (default 80%), a yellow warning appears:
+
+```
+⚠ 上下文85% · 嗯… · 总1m23s
+```
+
+Set `contextWarnAt: 0` to disable.
+
+### 🔥 Combo Detection
+5+ consecutive tool calls (within 2.5s gaps, or parallel) triggers `火力全开×N`. 10+ tools triggers `十连击` in the done summary.
+
+### ⏱ Slow-Tool Warning
+Single tool exceeding 30 seconds shows `这个有点慢 · ` as a warning prefix.
+
+### 🌙 Time-Aware Fun
+- **0–6 AM**: Night phrases like `熬夜冠军` `夜猫子出没` are mixed into the thinking pool.
+- **Weekends**: First turn of the session gets a `周末也在卷？` greeting.
+
+### 🎨 30+ Animation Presets
+Switch indicator frames via `/activity` (interactive picker) or `/activity frames <name>`:
+
+`claude` `braille` `moon` `comet` `spark` `breathe` `dots` `circle` `pulse` `star2` `flip` `aesthetic` `hamburger` `random` …
+
+## Installation
 
 ```bash
 pi install npm:pi-working-activity
 ```
 
-或本地开发：
+Or from local path:
 
 ```bash
 pi install /path/to/pi-working-activity
 ```
 
-## 使用
+## Configuration
 
-```
-/activity                 # 打开动画预设选择器
-/activity frames <name>   # 直接切换预设（/activity frames claude）
-/activity frames random   # 每轮随机
-/activity narrate on|off  # 模型自述开关
-```
-
-## 配置
-
-配置文件 `~/.pi/agent/working-activity.json`（自动生成）：
+`~/.pi/agent/working-activity.json` (auto-created on first run):
 
 ```json
 {
-  "frames": "claude",
+  "frames": "moon",
   "narrate": false,
   "contextWarnAt": 80,
-  "customPhrases": ["我的自定义文案"],
+  "customPhrases": [],
   "debugLog": false
 }
 ```
 
-| 字段 | 默认 | 说明 |
-|------|------|------|
-| `frames` | `"moon"` | 动画预设名，或 `"random"` |
-| `narrate` | `false` | 模型自述模式：向模型注入约定，让它每步写一行 ⏵ 状态 |
-| `contextWarnAt` | `80` | 上下文预警阈值（百分比），`0` 关闭 |
-| `customPhrases` | `[]` | 追加到思考文案池的自定义短句 |
-| `debugLog` | `false` | 调试日志（`~/.pi/agent/working-activity-debug.log`，>512KB 自动截断） |
+| Key | Default | Description |
+|-----|---------|-------------|
+| `frames` | `"moon"` | Animation preset name, or `"random"` for a different one each turn |
+| `narrate` | `false` | Enable model self-narration (⏵ status lines) |
+| `contextWarnAt` | `80` | Context-usage warning threshold in percent. `0` disables |
+| `customPhrases` | `[]` | Extra phrases to mix into the thinking pool |
+| `debugLog` | `false` | Write debug events to `~/.pi/agent/working-activity-debug.log` (auto-truncates at 512KB) |
 
-## 模型自述模式
+## Commands
 
-`narrate: true` 时，扩展通过 `context` 事件向模型注入一条约定：每个步骤开始时在正文单独一行写 `⏵ 你在做的事（≤20字）`。扩展从流式输出中解析该行并显示在 Working 行，正文中的 ⏵ 行也会正常出现。
+| Command | Description |
+|---------|-------------|
+| `/activity` | Open interactive preset picker (select with Enter) |
+| `/activity frames <name>` | Switch preset directly |
+| `/activity frames random` | Random preset each turn |
+| `/activity narrate on\|off` | Toggle model self-narration |
 
-效果：`修复登录页样式 · 改改 login.tsx` —— 自述为主文案，工具动作退为后缀。
+## How Self-Narration Works
+
+When `narrate: true`, the extension uses the `context` event to inject a developer message into every LLM call:
+
+> [Status bar] You have a status bar shown to the user. **[Required]** At the start of every step/subtask, write a single line: ⏵ what you're doing (≤20 chars). Information-first — let people know at a glance what you're working on. Keep it natural and playful. Switch it when you switch tasks.
+
+The extension parses `text_delta` events from the model's streaming output, looking for `⏵ ` lines. The latest captured line is displayed on the Working line with a 2-second minimum display time. It stays fresh during active streaming and fades 5 seconds after the model goes quiet.
 
 ## License
 

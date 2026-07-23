@@ -116,11 +116,11 @@ function writeConfig(cfg: Config): void {
 // ─── 文案映射（俏皮 + 保留真实参数）───────────────────────────────
 
 const ACTION_MAP: Array<{ test: RegExp; actions: string[] }> = [
-	{ test: /^(read|read_file|cat)$/i, actions: ["翻翻", "看看", "瞄一眼", "读一下", "康康", "翻一页"] },
+	{ test: /^(read|read_file|cat)$/i, actions: ["翻翻", "看看", "瞄一眼", "读一下", "康康", "翻一页", "翻翻看"] },
 	{ test: /^(write|write_file|create_file)$/i, actions: ["写一下", "记下来", "落笔", "存个文件", "开写", "生成文件"] },
-	{ test: /^(edit|edit_file|str_replace|apply_patch|search_replace)$/i, actions: ["改改", "修一下", "改两行", "调一下", "整一下", "补一刀"] },
-	{ test: /^(bash|shell|run|exec|powershell|cmd)$/i, actions: ["跑一下", "执行", "敲个命令", "跑命令", "整一下", "搞一下", "使唤终端"] },
-	{ test: /^(grep|rg|search|search_in_files|ffgrep)$/i, actions: ["搜搜", "找找", "搜一下", "翻翻", "搜一圈", "扫一眼"] },
+	{ test: /^(edit|edit_file|str_replace|apply_patch|search_replace)$/i, actions: ["改改", "修一下", "改两行", "调一下", "整一下", "补一刀", "动动手指"] },
+	{ test: /^(bash|shell|run|exec|powershell|cmd)$/i, actions: ["跑一下", "执行", "敲个命令", "跑命令", "整一下", "搞一下", "使唤终端", "跑个腿"] },
+	{ test: /^(grep|rg|search|search_in_files|ffgrep)$/i, actions: ["搜搜", "找找", "搜一下", "翻翻", "搜一圈", "扫一眼", "挖一挖"] },
 	{ test: /^(find|glob|fffind)$/i, actions: ["找找文件", "找一下", "摸一下", "搜搜目录"] },
 	{ test: /^(ls|list_dir|list)$/i, actions: ["看看目录", "列一下", "瞟一眼", "翻翻"] },
 	{ test: /^(web_search|search_web|brave|tavily|exa|search-layer)$/i, actions: ["上网搜搜", "查查", "搜一下", "搜一圈", "打听一下"] },
@@ -174,10 +174,10 @@ const THINKING_PHRASES = [
 	"转转脑子",
 	"emm",
 	"…诶",
-	"好",
-	"明白",
-	"好的",
-	"来",
+	"好滴",
+	"懂了懂了",
+	"没问题",
+	"来咯",
 	"走着",
 	"康康",
 	"嗯哼",
@@ -185,13 +185,13 @@ const THINKING_PHRASES = [
 	"冲",
 	"好嘞",
 	"收到",
-	"了解",
-	"行吧",
+	"明白明白",
+	"好叭",
 	"okk",
 	"hhh",
-	"wow",
-	"nice",
-	"rgrg",
+	"哇哦",
+	"可以可以",
+	"好好好",
 	"等一下",
 	"我查查",
 	"翻翻看",
@@ -208,12 +208,19 @@ const THINKING_PHRASES = [
 	"等下",
 	"诶嘿",
 	"嗯",
+	"啾",
+	"等一下下",
+	"别催别催",
+	"这个我会",
+	"轻轻松松",
+	"想好了想好了",
+	"脑袋转起来了",
 ];
 
 /** 想久了自动换文案：30s / 1min / 5min 四档 */
-const THINKING_PHRASES_30S = ["有点久…", "快了快了", "马上好…", "给我点时间…", "转圈圈…", "等等", "马上马上"];
-const THINKING_PHRASES_1M = ["还在努力…", "这个有点绕…", "在收尾了…", "快了真的快了…", "快了快了快了", "马上了马上了…"];
-const THINKING_PHRASES_5M = ["还没放弃…", "这题真的硬…", "再给我一会…", "在路上了…", "还没好…", "再等等"];
+const THINKING_PHRASES_30S = ["有点久…", "快了快了", "马上好…", "给我点时间…", "转圈圈…", "等等", "马上马上", "再等一小下"];
+const THINKING_PHRASES_1M = ["还在努力…", "这个有点绕…", "在收尾了…", "快了真的快了…", "快了快了快了", "马上了马上了…", "烧脑中…", "脑细胞阵亡中…"];
+const THINKING_PHRASES_5M = ["还没放弃…", "这题真的硬…", "再给我一会…", "在路上了…", "还没好…", "再等等", "我给跪了…", "下次不敢了…"];
 const THINKING_TIER_30S = 30_000;
 const THINKING_TIER_1M = 60_000;
 const THINKING_TIER_5M = 300_000;
@@ -228,6 +235,8 @@ const NIGHT_PHRASES = [
 	"熬夜冠军",
 	"夜猫子出没",
 	"还不睡吗",
+	"这个点还不睡？",
+	"修仙中…",
 ];
 /** 稀有文案：约 1/80 概率（每 3–4 分钟出现一次） */
 const RARE_PHRASES = [
@@ -260,31 +269,35 @@ const RARE_PHRASES = [
 ];
 const RARE_CHANCE = 1 / 150;
 /** 收尾文案池：随机挑 */
-const DONE_PHRASES = ["搞定", "收工", "妥了", "完事", "收摊", "齐活", "拿下", "好了", "ok", "搞定收工"];
+const DONE_PHRASES = ["搞定", "收工", "妥了", "完事", "收摊", "齐活", "拿下", "好啦", "搞定收工", "交差", "收工大吉"];
 /** 打断后再启动的接梗文案 */
 const CONTINUE_PHRASES = ["继续…", "刚才说到哪…", "回来了…", "好，接着来…", "接上…", "继续继续", "没断片"];
 /** 等待模型第一个 token 时轮换的文案 */
 const WAITING_PHRASES = [
-	"等模型开口…",
+	"呼叫模型…",
 	"嗯…",
 	"让我想想",
 	"正在想",
 	"在打字了",
-	"组织语言中",
+	"码字中…",
 	"酝酿一下",
 	"马上就来",
 	"来了来了",
 	"emmm",
 	"等一下",
 	"快好了",
-	"整理思路",
+	"想想先",
 	"让我盘盘",
 	"在加载了…",
 	"别急别急",
-	"正在连线…",
+	"拨号中…",
 	"信号挺好",
-	"缓缓",
-	"刷刷",
+	"等等我嘛",
+	"快了快了",
+	"开机中…",
+	"热热身…",
+	"喂喂喂…",
+	"在吗在吗",
 ];
 const WAITING_PHRASE_TICKS = 15; // ~2.6s 换一句
 /** combo 阈值：连续多少个工具算火力全开 */
