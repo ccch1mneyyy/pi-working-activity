@@ -195,6 +195,12 @@ const THINKING_PHRASES = [
 	"wow",
 	"nice",
 	"rgrg",
+	"lol",
+	"hm",
+	"oh",
+	"ok",
+	"um",
+	"heh",
 	"等一下",
 	"我查查",
 	"翻翻看",
@@ -269,6 +275,8 @@ const RARE_PHRASES = [
 	"噔噔",
 	"逮到你了",
 	"是我是我",
+	"gg",
+	"ez",
 ];
 const RARE_CHANCE = 1 / 150;
 /** 收尾文案池：随机挑 */
