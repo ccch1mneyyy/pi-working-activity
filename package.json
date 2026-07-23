@@ -1,7 +1,7 @@
 {
   "name": "pi-working-activity",
   "version": "1.0.0",
-  "description": "Lively Working-line for pi CLI — real tool activity, playful Chinese phrases, model self-narration, rare rainbow easter eggs, context warning",
+  "description": "Lively Working-line for pi CLI — real tool activity, playful phrases (DeepSeek V4 Pro), rainbow easter eggs, self-narration, context warning",
   "author": "",
   "license": "MIT",
   "keywords": [
@@ -10,7 +10,8 @@
     "working-indicator",
     "status",
     "activity",
-    "spinner"
+    "spinner",
+    "pi-coding-agent"
   ],
   "pi": {
     "extensions": [
@@ -26,6 +27,16 @@
     }
   },
   "files": [
-    "extensions"
-  ]
+    "extensions",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "bugs": {
+    "url": ""
+  },
+  "homepage": ""
 }
