@@ -141,7 +141,7 @@ const ACTION_MAP: Array<{ test: RegExp; actions: string[] }> = [
 	{ test: /^(subagent|workflow|orchestrat)/i, actions: ["派个小弟","小助手出动","支个 agent","让小弟跑腿","代理干活","子任务起飞","分个任务","交给小弟","派出去"] },
 ];
 
-/** 思考文案池：短、口语、俏皮（DeepSeek V4 Pro 生成 + 过滤） */
+/** 思考文案池：短、口语、俏皮 */
 const THINKING_PHRASES = [
 	"嗯…让我捋捋",
 	"盘一下盘一下",

@@ -1,7 +1,6 @@
 # pi-working-activity
 
-> 让 pi 的 Working 行活过来——实时工具动态 + 俏皮中文文案 + 稀有彩虹彩蛋 + 模型自述 + 上下文预警。  
-> Phrase pools authored by [DeepSeek V4 Pro](https://www.deepseek.com/).
+> 让 pi 的 Working 行活过来——实时工具动态 + 俏皮中文文案 + 稀有彩虹彩蛋 + 模型自述 + 上下文预警。
 
 ## 功能一览
 
@@ -19,7 +18,7 @@
 执行时间 < 1.5s 的工具一闪而过？不会。快工具排队逐个播 1s，最后一条粘留 3s，让你看得到。
 
 ### 💬 俏皮文案池
-思考时 Working 行轮换 95 条口语化短句（DeepSeek V4 Pro 生成），约 2.6s 一换，像活人在说话。
+思考时 Working 行轮换 95 条口语化短句，约 2.6s 一换，像活人在说话。
 
 > 嗯…让我捋捋 → 盘一下盘一下 → 大脑转起来了 → 思考.gif → 啾，让我想想 → lol → 别催别催
 
@@ -114,14 +113,10 @@ pi install npm:pi-working-activity
 
 ## 文案风格
 
-- **中文**：短、口语、俏皮，不说教不摆谱。大部分由 DeepSeek V4 Pro 生成，手工过滤长度后入库
+- **中文**：短、口语、俏皮，不说教不摆谱
 - **英文**：面无表情的冷幽默，穿插在中文文案中制造反差
 - **游戏梗**（SSR、金色传说、gg、ez）只放在稀有彩蛋池（1/150 爆率），不影响日常使用
 
 ## License
 
 MIT
-
-## Credits
-
-全部文案池（thinking / waiting / rare / done / continue / weekend / actionMap）和 README 初稿由 [DeepSeek V4 Pro](https://www.deepseek.com/) 官方 API 生成，经长度过滤 + 风格校对后入库。
