@@ -201,6 +201,9 @@ const THINKING_PHRASES = [
 	"ok",
 	"um",
 	"heh",
+	"uh",
+	"nah",
+	"mm",
 	"等一下",
 	"我查查",
 	"翻翻看",
@@ -280,9 +283,9 @@ const RARE_PHRASES = [
 ];
 const RARE_CHANCE = 1 / 150;
 /** 收尾文案池：随机挑 */
-const DONE_PHRASES = ["搞定", "收工", "妥了", "完事", "收摊", "齐活", "拿下", "好啦", "搞定收工", "交差", "收工大吉"];
+const DONE_PHRASES = ["搞定", "收工", "妥了", "完事", "收摊", "齐活", "拿下", "好啦", "搞定收工", "交差", "收工大吉", "done"];
 /** 打断后再启动的接梗文案 */
-const CONTINUE_PHRASES = ["继续…", "刚才说到哪…", "回来了…", "好，接着来…", "接上…", "继续继续", "没断片"];
+const CONTINUE_PHRASES = ["继续…", "刚才说到哪…", "回来了…", "好，接着来…", "接上…", "继续继续", "没断片", "again"];
 /** 等待模型第一个 token 时轮换的文案 */
 const WAITING_PHRASES = [
 	"呼叫模型…",
