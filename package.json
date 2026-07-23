@@ -1,0 +1,31 @@
+{
+  "name": "pi-working-activity",
+  "version": "1.0.0",
+  "description": "Lively Working-line for pi CLI — real tool activity, playful Chinese phrases, model self-narration, rare rainbow easter eggs, context warning",
+  "author": "",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "working-indicator",
+    "status",
+    "activity",
+    "spinner"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
+  },
+  "files": [
+    "extensions"
+  ]
+}
