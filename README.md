@@ -1,109 +1,122 @@
 # pi-working-activity
 
-_Make the pi CLI working line come alive — real tool activity, playful Chinese + English phrases, and self-narration._
+> 让 pi 的 Working 行活过来——实时工具动态 + 俏皮中文文案 + 稀有彩虹彩蛋 + 模型自述 + 上下文预警。  
+> Phrase pools authored by [DeepSeek V4 Pro](https://www.deepseek.com/).
 
-## Features
+## 功能一览
 
-### 1. Real tool activity animations
-Monitors `tool_execution_start` / `tool_execution_end` and shows live Chinese action labels + file names / command summaries.
+### 🛠 真实工具活动
+监听 `tool_execution_start` / `tool_execution_end`，Working 行实时显示正在跑什么——不是假转圈。
 
 ```
 翻翻 src/index.ts
 改改 package.json
-跑命令 rm -rf node_modules
+跑命令 npm run build
+搜搜 NARRATE_MIN_MS
 ```
 
-### 2. Fast tool queue replay
-Tools finishing in < 1.5 s are queued. Each plays for 1 s in order; the last one sticks for 3 s so you can read it.
+### ⏩ 快工具队列重播
+执行时间 < 1.5s 的工具一闪而过？不会。快工具排队逐个播 1s，最后一条粘留 3s，让你看得到。
 
-### 3. Witty Chinese thinking phrase pool
-70+ colloquial Chinese lines rotate every ~2.6 s while waiting.
+### 💬 俏皮文案池
+思考时 Working 行轮换 95 条口语化短句（DeepSeek V4 Pro 生成），约 2.6s 一换，像活人在说话。
 
-> 嗯...让我想想  
-> 搜肠刮肚中  
-> 大脑过载请稍候
+> 嗯…让我捋捋 → 盘一下盘一下 → 大脑转起来了 → 思考.gif → 啾，让我想想 → lol → 别催别催
 
-### 4. Waiting-for-first-token pool
-A separate set of phrases used specifically when the model hasn’t emitted its first token yet.
+想太久了自动换档：
+- 🕐 **30s**：转圈圈… 马上马上 嗯，让我细想想
+- 🕑 **1min**：还在努力… 烧脑中… 这题有点东西
+- 🕒 **5min**：还没放弃… 这题真的硬… 我给跪了…
 
-### 5. Thinking time tiers
-After 30 s / 1 min / 5 min of thinking, the phrase pool mixes in more self‑deprecating or time‑aware lines.
-
-### 6. Rare easter egg (1 in 150 chance)
-A 7.5 s rainbow bold animation triggers randomly — with messages like `SSR`, `金色传说`, `gg`, `ez`.
-
-### 7. Self‑narration via ⏵ status line
-Inject a convention so the model writes its own ⏵ line. The extension parses and displays it, letting the model explain what it’s doing.
+### 🎰 稀有彩虹彩蛋
+约 1/150 概率（每 6–7 分钟一次），Working 行炸出加粗七彩流光，停留 7.5 秒。
 
 ```
-⏵ 正在分析类型定义...
-⏵ 刚刚发现了一个循环引用
+S S R ！  金色传说  g g  e z  暴击了  wink ~  你发现我了
+```
+每个字独立色相 & 加粗，95% 饱和度，14°/帧滚动。很浮夸，很爽。
+
+### ⏵ 模型自述
+可选功能。开关打开后，扩展通过 `context` 事件向模型注入一条约定：每个步骤开始时写 `⏵ 你在做什么（≤20 字）`。扩展实时解析流式输出，把自述显示在 Working 行。
+
+```
+⏵ 查一下报错原因        →  Working 行：查一下报错原因 · 搜搜 error.log
+⏵ 给补丁跑个验证        →  Working 行：给补丁跑个验证 · 跑命令 node test
 ```
 
-### 8. Pacing with total & split times
-During thinking: `· 总1m23s`  
-After completion: a notification with total time + breakdown: think Xs / do Ys.
+### 📊 实时配速
+- 思考中：`嗯… · 总1m23s`
+- 工具中：`改改 file.ts · 3s`
+- 结束后：底部状态区闪现 `搞定 ✓ · 4 工具 · 想3s 干2s`，同时对话区末尾弹通知 `⏱ 总用时 1m23s · 4 工具 · 想12s 干11s`
 
-### 9. Context usage warning
-When `getContextUsage` percent ≥ 80%, shows `⚠ 上下文80%` in the working line.
+### ⚠ 上下文预警
+每 3s 检查一次 context 用量。超过阈值（默认 80%）时 Working 行亮黄：
 
-### 10. Streak combos
-- 5+ consecutive fast tools → `火力全开×5`
-- 10+ → `十连击!`
+```
+⚠ 上下文85% · 嗯… · 总1m23s
+```
 
-### 11. Slow tool hint
-Tools taking > 30 s show a gentle `这个有点慢…` cue.
+`contextWarnAt: 0` 关闭。
 
-### 12. Late‑night / weekend greetings
-Automatically detects 00:00–06:00 or weekend days and inserts a friendly message.
+### 🔥 连击检测
+连续 5+ 工具触发 `火力全开×N`（并行工具也算连击）。10+ 工具收尾时显示 `十连击`。
 
-### 13. 30+ animation presets with `/activity` chooser
-Pick a visual style interactively via `/activity` – includes flashes, spinner variants, rainbow effects, etc.
+### ⏱ 慢工具提示
+单工具超 30s 亮 `这个有点慢 ·` 前缀。
 
-### 14. Deadpan English interjections
-`lol` `hm` `oh` `ok` `um` `heh` `uh` `nah` `mm` `wow` `nice` `rgrg` `done` `again` `gg` `ez` — dropped into the working line to keep you entertained.
+### 🌙 时间感知
+- **0–6 点**：思考池混入 `修仙中…` `夜猫子出没` `熬夜冠军` 等深夜专属文案
+- **周末**：首次会话弹一句 `周末也在卷？` `放假也陪你`
 
-## Installation
+### 🎨 30+ 动画预设
+`/activity` 打开交互选择器，或 `/activity frames <name>` 直接切：
+
+`claude` `braille` `moon` `comet` `spark` `breathe` `dots` `circle` `pulse` `star2` `flip` `aesthetic` `hamburger` `random` …
+
+### 😐 英文冷幽默
+`lol` `hm` `oh` `ok` `um` `heh` `uh` `nah` `mm` `wow` `nice` `rgrg` `done` `again` `gg` `ez`
+
+混在一堆「嗯…」「盘一下」「啾」中间，冷不丁冒一句面无表情的英语。那种「我也不是真的在笑」的冷感。
+
+## 安装
 
 ```bash
 pi install npm:pi-working-activity
 ```
 
-## Configuration
+## 配置
 
-Config file: `~/.pi/agent/working-activity.json`
+`~/.pi/agent/working-activity.json`（首次运行自动生成）：
 
-| Key             | Type     | Default | Description |
-|-----------------|----------|---------|-------------|
-| `frames`        | `string` | `"moon"` | Animation preset name. Use `/activity frames` to list. |
-| `narrate`       | `boolean`| `false`   | Enable ⏵ self‑narration parsing. |
-| `contextWarnAt` | `number` | `80`     | Context percent threshold for warning. |
-| `customPhrases` | `string[]` | `[]`   | Additional thinking phrases (Chinese or English). |
-| `debugLog`      | `boolean`| `false`  | Write NDJSON debug events to `~/.pi/agent/working-activity-debug.log` (auto-truncate >512KB). |
+| 键 | 类型 | 默认值 | 说明 |
+|---|------|--------|------|
+| `frames` | `string` | `"moon"` | 动画预设名，`"random"` 每轮随机 |
+| `narrate` | `boolean` | `false` | ⏵ 模型自述开关 |
+| `contextWarnAt` | `number` | `80` | 上下文预警阈值（百分比），`0` 关闭 |
+| `customPhrases` | `string[]` | `[]` | 追加到思考文案池的自定义短句 |
+| `debugLog` | `boolean` | `false` | 调试日志（`~/.pi/agent/working-activity-debug.log`，>512KB 自动截断） |
 
-## Commands
+## 命令
 
-- `/activity`  
-  Opens an interactive picker to choose animation preset.
+| 命令 | 说明 |
+|------|------|
+| `/activity` | 打开动画预设交互选择器 |
+| `/activity frames <name>` | 直接切换预设，如 `/activity frames claude` |
+| `/activity frames random` | 每轮随机一个预设 |
+| `/activity narrate on\|off` | 开关模型自述 |
 
-- `/activity frames <name>`  
-  Switch to a specific animation preset. Example: `/activity frames rainbow`
+## 模型自述原理
 
-- `/activity narrate on|off`  
-  Turn model self‑narration on or off.
+1. 扩展通过 `context` 事件注入 `<developer>` 消息：「每一步写 `⏵ 你正在做的事（≤20 字）`」
+2. 模型在流式输出中写下 `⏵ 查一下报错原因`
+3. 扩展实时解析 `text_delta`，提取最新 `⏵` 行展示在 Working 行
+4. 自述保险：最低展示 2s，流式活跃时不消失，安静 5s 后退回普通文案
 
-## How self‑narration works
+## 文案风格
 
-1. The extension injects a system‑level hint: “When you are thinking or performing a multi‑step action, write a ⏵ line describing what you’re doing.”
-2. The model emits a line like `⏵ 正在读取配置文件…`.
-3. The extension parses ⏵‑prefixed lines and renders them in a distinct style within the working line.
-4. If narration is off, ⏵ lines are hidden.
-
-## Phrase style notes
-
-- **Chinese phrases** are casual, affectionate, slightly self‑deprecating, matching the PI CLI’s Chinese UI voice.  
-- **English interjections** are short, deadpan (lol, hm, oh, ok, um, heh, uh, nah, mm, wow, nice, rgrg, done, again, gg, ez). They appear in the working line beside tool actions or during idle moments.  
-- All phrases are chosen to feel lightweight, never distracting.
+- **中文**：短、口语、俏皮，不说教不摆谱。大部分由 DeepSeek V4 Pro 生成，手工过滤长度后入库
+- **英文**：面无表情的冷幽默，穿插在中文文案中制造反差
+- **游戏梗**（SSR、金色传说、gg、ez）只放在稀有彩蛋池（1/150 爆率），不影响日常使用
 
 ## License
 
@@ -111,5 +124,4 @@ MIT
 
 ## Credits
 
-Phrase pools and README copy were generated with [DeepSeek V4 Pro](https://www.deepseek.com/) (official API), then lightly filtered for length and consistency.
-
+全部文案池（thinking / waiting / rare / done / continue / weekend / actionMap）和 README 初稿由 [DeepSeek V4 Pro](https://www.deepseek.com/) 官方 API 生成，经长度过滤 + 风格校对后入库。
