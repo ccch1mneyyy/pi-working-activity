@@ -2,7 +2,7 @@
   "name": "pi-working-activity",
   "version": "1.0.0",
   "description": "Lively Working-line for pi CLI — real tool activity, playful phrases (DeepSeek V4 Pro), rainbow easter eggs, self-narration, context warning",
-  "author": "",
+  "author": "chimney <ccchimneyyy@gmail.com>",
   "license": "MIT",
   "keywords": [
     "pi-package",
@@ -33,10 +33,10 @@
   ],
   "repository": {
     "type": "git",
-    "url": ""
+    "url": "git+https://github.com/ccch1mneyyy/pi-working-activity.git"
   },
   "bugs": {
-    "url": ""
+    "url": "https://github.com/ccch1mneyyy/pi-working-activity/issues"
   },
-  "homepage": ""
+  "homepage": "https://github.com/ccch1mneyyy/pi-working-activity#readme"
 }
