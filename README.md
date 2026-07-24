@@ -122,6 +122,24 @@ Pi 的流式事件不提供逐段 usage，因此这是实时估算值；收尾�
 }
 ```
 
+### 🎭 双模式 + 特性开关
+花埑功能全部可选。总开关一键切换：
+
+```
+/activity mode minimal   →  只显示真实工具 + 计时 + 预警
+/activity mode lively    →  全套俏皮文案 + 彩蛋（默认）
+```
+
+单特性独立开关（覆盖模式默认）：
+
+```
+/activity feature              →  列出所有特性状态
+/activity feature rareEggs off →  只关彩虹彩蛋
+/activity feature shimmer auto →  恢复跟随模式
+```
+
+可开关特性：`phrases`（俏皮文案）`rareEggs`（彩虹彩蛋）`nightPhrases`（深夜文案）`weekend`（周末问候）`holidays`（节假日）`combo`（连击）`failPhrases`（失败文案）`modelQuips`（模型梗）`shimmer`（星辉扫过）`continuePhrases`（打断接梗）
+
 ## 安装
 
 ```bash
@@ -143,6 +161,8 @@ pi install npm:pi-working-activity
 | `customPhrases` | `string[]` | `[]` | 追加到思考文案池的自定义短句 |
 | `customActions` | `object` | — | 自定义工具→文案映射，如 `{"my_tool": ["搞一下","整一个"]}` |
 | `debugLog` | `boolean` | `false` | 调试日志（`~/.pi/agent/working-activity-debug.log`，>512KB 自动截断） |
+| `mode` | `string` | `"lively"` | `"minimal"` 只保留功能性信息 |
+| `features` | `object` | — | 单特性开关，如 `{"rareEggs": false}`，覆盖 mode 默认 |
 
 ## 命令
 
@@ -152,6 +172,9 @@ pi install npm:pi-working-activity
 | `/activity frames <name>` | 直接切换预设，如 `/activity frames claude` |
 | `/activity frames random` | 每轮随机一个预设 |
 | `/activity narrate on\|off` | 开关模型自述 |
+| `/activity mode lively\|minimal` | 总开关：花哨 / 极简 |
+| `/activity feature` | 列出所有特性开关状态 |
+| `/activity feature <名> on\|off\|auto` | 单特性开关，auto 恢复跟随模式 |
 | `/activity status` | 显示当前所有配置 |
 | `/activity warn <0-100>` | 修改上下文预警阈值，0=关闭 |
 | `/activity danger <n>` | 修改红色危险阈值，必须不低于 warn 阈值 |
