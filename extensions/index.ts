@@ -101,9 +101,9 @@ function configPath(): string {
 	return path.join(getAgentDir(), "working-activity.json");
 }
 
-function readConfig(): Config {
+function readConfig(): { cfg: Config; raw: Record<string, unknown> } {
 	try {
-		const raw = JSON.parse(fs.readFileSync(configPath(), "utf8"));
+		const raw = JSON.parse(fs.readFileSync(configPath(), "utf8")) as Record<string, unknown>;
 		const cfg: Config = { frames: DEFAULT_PRESET };
 		if (typeof raw.frames === "string" && (FRAME_PRESETS[raw.frames] || raw.frames === "random")) {
 			cfg.frames = raw.frames;
@@ -133,14 +133,15 @@ function readConfig(): Config {
 			}
 			if (Object.keys(ca).length > 0) cfg.customActions = ca;
 		}
-		return cfg;
+		return { cfg, raw };
 	} catch {}
-	return { frames: DEFAULT_PRESET };
+	return { cfg: { frames: DEFAULT_PRESET }, raw: {} };
 }
 
-function writeConfig(cfg: Config): void {
+function writeConfig(cfg: Config, raw: Record<string, unknown>): void {
 	try {
-		fs.writeFileSync(configPath(), JSON.stringify(cfg, null, 2) + "\n", "utf8");
+		// 合并不认识的键（如用户手写的 position 等），防止被静默删除
+		fs.writeFileSync(configPath(), JSON.stringify({ ...raw, ...cfg }, null, 2) + "\n", "utf8");
 	} catch {}
 }
 
@@ -740,7 +741,15 @@ export default function (pi: ExtensionAPI) {
 	let tickTimer: ReturnType<typeof setInterval> | null = null;
 	let tick = 0;
 	let rotateIdx = 0;
-	let config = readConfig();
+	let rawConfig: Record<string, unknown> = {};
+	let config: Config;
+	{
+		const initial = readConfig();
+		config = initial.cfg;
+		rawConfig = initial.raw;
+	}
+	/** 写配置：合并未知键，防止用户手写字段被删 */
+	const saveConfig = () => writeConfig(config, rawConfig);
 	let accentHex: string | null = null;
 	/** 当前思考文案（随机切换） */
 	let thinkingPhrase: string | null = null;
@@ -1098,8 +1107,12 @@ export default function (pi: ExtensionAPI) {
 			modelTimer = null;
 		}
 		stopTick();
-		config = readConfig();
-		if (!fs.existsSync(configPath())) writeConfig(config);
+		{
+			const loaded = readConfig();
+			config = loaded.cfg;
+			rawConfig = loaded.raw;
+		}
+		if (!fs.existsSync(configPath())) saveConfig();
 		accentHex = accentHexOf(ctx);
 		applyFrames(ctx);
 		ctx.ui.setWorkingMessage(undefined);
@@ -1393,7 +1406,7 @@ export default function (pi: ExtensionAPI) {
 		handler: async (args, ctx) => {
 			const apply = (name: string) => {
 				config = { ...config, frames: name };
-				writeConfig(config);
+				saveConfig();
 				applyFrames(ctx);
 				ctx.ui.notify(`指示器已切换：${name}`, "info");
 			};
@@ -1424,7 +1437,7 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 				config = { ...config, contextWarnAt: n };
-				writeConfig(config);
+				saveConfig();
 				ctx.ui.notify(
 					n === 0 ? "上下文预警已关闭" : `上下文预警阈值已设为 ${n}%`,
 					"info",
@@ -1441,7 +1454,7 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 				config = { ...config, contextDangerAt: n };
-				writeConfig(config);
+				saveConfig();
 				ctx.ui.notify(`上下文危险阈值已设为 ${n}%`, "info");
 				return;
 			}
@@ -1459,7 +1472,7 @@ export default function (pi: ExtensionAPI) {
 					tokBucket = 0;
 					tokBucketStartMs = 0;
 				}
-				writeConfig(config);
+				saveConfig();
 				ctx.ui.notify(on ? "~tok/s 显示已开启（流式估算）" : "~tok/s 显示已关闭", "info");
 				return;
 			}
@@ -1472,7 +1485,7 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 				config = { ...config, workRemindAt: hours };
-				writeConfig(config);
+				saveConfig();
 				ctx.ui.notify(hours === 0 ? "累计活跃提醒已关闭" : `每累计活跃 ${hours} 小时提醒一次`, "info");
 				return;
 			}
@@ -1493,7 +1506,7 @@ export default function (pi: ExtensionAPI) {
 						...config,
 						customPhrases: [...(config.customPhrases ?? []), phrase],
 					};
-					writeConfig(config);
+					saveConfig();
 					ctx.ui.notify(`已添加自定义短语：${phrase}`, "info");
 					return;
 				}
@@ -1535,7 +1548,7 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 				config = { ...config, narrate: on };
-				writeConfig(config);
+				saveConfig();
 				if (!on) {
 					narratedStatus = null;
 					recentText = "";
