@@ -1,6 +1,6 @@
 {
   "name": "pi-working-activity",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Lively Working-line for pi CLI — real tool activity, playful phrases, rainbow easter eggs, self-narration, context warning",
   "author": "chimney <ccchimneyyy@gmail.com>",
   "license": "MIT",
@@ -19,7 +19,7 @@
     ]
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=3.0.0"
+    "@earendil-works/pi-coding-agent": ">=0.81.0"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-coding-agent": {

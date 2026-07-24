@@ -77,6 +77,51 @@ S S R ！  金色传说  g g  e z  暴击了  wink ~  你发现我了
 
 混在一堆「嗯…」「盘一下」「啾」中间，冷不丁冒一句面无表情的英语。那种「我也不是真的在笑」的冷感。
 
+### ❌ 工具失败文案
+出错的工具不再只是 `✗`，而是随机一句：
+
+```
+翻车了 · 读文件 config.json ✗
+权限不对？ · 跑命令 npm i ✗
+```
+
+### 🤖 子代理计数
+并行多个子代理时显示 `小弟×N`：
+
+```
+派个小弟 修测试 · 小弟×3 · 另 2 项
+```
+
+### ⚡ ~tok/s 流式速率
+`showTokPerSec: true` 后，按 `text_delta` 的中英文字符粗估流式 token 速率：
+
+```
+~42 tok/s · 嗯… · 总1m23s
+```
+
+Pi 的流式事件不提供逐段 usage，因此这是实时估算值；收尾摘要里的 token 数仍使用模型返回的实际 usage。
+
+### 🎄 节假日彩蛋
+元旦、春节、情人节、愚人节、劳动节、儿童节、万圣节、平安夜、圣诞、跨年——自动检测，思考池混入节日专属文案，同样用七彩流光渲染。
+
+### 🔄 模型切换梗
+`/model` 切模型时，Working 行闪一句和模型名相关的梗，1.5s 后恢复。
+
+### ☕ 累计活跃提醒
+默认每累计活跃 3 小时弹一次提示，提醒喝水休息。只有 agent 真正运行的时间计入；`workRemindAt: 0` 关闭，或改成其他间隔（小时数）。
+
+### 🔧 自定义工具映射
+`customActions` 让你为自己的工具/MCP 定义文案映射，按工具名精确匹配（不执行配置中的正则）：
+
+```json
+{
+  "customActions": {
+    "my_deploy": ["部署一下", "上线中"],
+    "format_code": ["格式化", "整理代码"]
+  }
+}
+```
+
 ## 安装
 
 ```bash
@@ -92,7 +137,11 @@ pi install npm:pi-working-activity
 | `frames` | `string` | `"moon"` | 动画预设名，`"random"` 每轮随机 |
 | `narrate` | `boolean` | `false` | ⏵ 模型自述开关 |
 | `contextWarnAt` | `number` | `80` | 上下文预警阈值（百分比），`0` 关闭 |
+| `contextDangerAt` | `number` | `95` | 上下文危险阈值，超过后变红 |
+| `showTokPerSec` | `boolean` | `false` | 流式输出时显示 `~tok/s` 估算速率 |
+| `workRemindAt` | `number` | `3` | 累计活跃 N 小时提醒喝水，`0` 关闭 |
 | `customPhrases` | `string[]` | `[]` | 追加到思考文案池的自定义短句 |
+| `customActions` | `object` | — | 自定义工具→文案映射，如 `{"my_tool": ["搞一下","整一个"]}` |
 | `debugLog` | `boolean` | `false` | 调试日志（`~/.pi/agent/working-activity-debug.log`，>512KB 自动截断） |
 
 ## 命令
@@ -103,13 +152,21 @@ pi install npm:pi-working-activity
 | `/activity frames <name>` | 直接切换预设，如 `/activity frames claude` |
 | `/activity frames random` | 每轮随机一个预设 |
 | `/activity narrate on\|off` | 开关模型自述 |
+| `/activity status` | 显示当前所有配置 |
+| `/activity warn <0-100>` | 修改上下文预警阈值，0=关闭 |
+| `/activity danger <n>` | 修改红色危险阈值，必须不低于 warn 阈值 |
+| `/activity tps on\|off` | 开关流式 `~tok/s` 估算显示 |
+| `/activity remind <0-24>` | 设置累计活跃提醒间隔，0=关闭 |
+| `/activity phrase add <文案>` | 追加自定义思考短语 |
+| `/activity phrase list` | 列出所有自定义短语 |
+| `/activity stats` | 本轮统计：工具数、想/干比、tps、会话时长 |
 
 ## 模型自述原理
 
-1. 扩展通过 `context` 事件注入 `<developer>` 消息：「每一步写 `⏵ 你正在做的事（≤20 字）`」
+1. 扩展通过 `before_agent_start` 把约定追加到该轮 system prompt：「每一步写 `⏵ 你正在做的事（≤20 字）`」
 2. 模型在流式输出中写下 `⏵ 查一下报错原因`
 3. 扩展实时解析 `text_delta`，提取最新 `⏵` 行展示在 Working 行
-4. 自述保险：最低展示 2s，流式活跃时不消失，安静 5s 后退回普通文案
+4. 每个 LLM turn 重置等待态；自述最低展示 2s，流式活跃时不消失，安静 5s 后退回普通文案
 
 ## 文案风格
 

@@ -76,6 +76,8 @@ const FRAME_PRESETS: Record<string, { frames: string[]; intervalMs: number }> = 
 const DEFAULT_PRESET = "moon";
 /** 收尾闪现的扩展状态 key */
 const DONE_STATUS_KEY = "working-activity-done";
+/** 空闲时展示模型切换梗的状态 key */
+const MODEL_STATUS_KEY = "working-activity-model";
 /** 调试日志路径（配置 debugLog: true 开启） */
 function debugLogPath(): string {
 	return path.join(getAgentDir(), "working-activity-debug.log");
@@ -83,7 +85,17 @@ function debugLogPath(): string {
 
 // ─── 配置读写 ─────────────────────────────────────────────────────
 
-type Config = { frames: string; customPhrases?: string[]; narrate?: boolean; debugLog?: boolean; contextWarnAt?: number };
+type Config = {
+	frames: string;
+	customPhrases?: string[];
+	customActions?: Record<string, string[]>;
+	narrate?: boolean;
+	debugLog?: boolean;
+	contextWarnAt?: number;
+	contextDangerAt?: number;
+	showTokPerSec?: boolean;
+	workRemindAt?: number;
+};
 
 function configPath(): string {
 	return path.join(getAgentDir(), "working-activity.json");
@@ -101,7 +113,26 @@ function readConfig(): Config {
 		}
 		if (typeof raw.narrate === "boolean") cfg.narrate = raw.narrate;
 		if (typeof raw.debugLog === "boolean") cfg.debugLog = raw.debugLog;
-		if (typeof raw.contextWarnAt === "number") cfg.contextWarnAt = raw.contextWarnAt;
+		if (typeof raw.contextWarnAt === "number" && Number.isFinite(raw.contextWarnAt) && raw.contextWarnAt >= 0 && raw.contextWarnAt <= 100) {
+			cfg.contextWarnAt = raw.contextWarnAt;
+		}
+		if (typeof raw.contextDangerAt === "number" && Number.isFinite(raw.contextDangerAt) && raw.contextDangerAt >= 0 && raw.contextDangerAt <= 100) {
+			cfg.contextDangerAt = raw.contextDangerAt;
+		}
+		if (typeof raw.showTokPerSec === "boolean") cfg.showTokPerSec = raw.showTokPerSec;
+		if (typeof raw.workRemindAt === "number" && Number.isFinite(raw.workRemindAt) && raw.workRemindAt >= 0 && raw.workRemindAt <= 24) {
+			cfg.workRemindAt = raw.workRemindAt;
+		}
+		if (raw.customActions && typeof raw.customActions === "object" && !Array.isArray(raw.customActions)) {
+			const ca: Record<string, string[]> = {};
+			for (const [key, value] of Object.entries(raw.customActions)) {
+				const actions = Array.isArray(value)
+					? value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0).map((entry) => entry.trim())
+					: [];
+				if (key.trim() && actions.length > 0) ca[key.trim()] = actions;
+			}
+			if (Object.keys(ca).length > 0) cfg.customActions = ca;
+		}
 		return cfg;
 	} catch {}
 	return { frames: DEFAULT_PRESET };
@@ -124,7 +155,7 @@ const ACTION_MAP: Array<{ test: RegExp; actions: string[] }> = [
 	{ test: /^(find|glob|fffind)$/i, actions: ["找找文件","找一下","寻宝中","找啊找","文件在哪","查找中","摸一下","搜搜目录"] },
 	{ test: /^(ls|list_dir|list)$/i, actions: ["列个清单","看看目录","ls 看一眼","瞄一下文件","目录走起","列出来","列一下","瞟一眼","翻翻"] },
 	{ test: /^(web_search|search_web|brave|tavily|exa|search-layer)$/i, actions: ["网上搜搜","搜一下","网络冲浪","查找资料","搜搜看","上网瞄瞄","上网搜搜","查查","搜一圈","打听一下"] },
-	{ test: /^(web_fetch|fetch|fetch_content|get_search_content|batch_web_fetch)$/i, actions: ["抓个页面","拉取一下","fetch 中","扒拉网���","取点内容","抓取资料","扒一下","拉一下","打开看看"] },
+	{ test: /^(web_fetch|fetch|fetch_content|get_search_content|batch_web_fetch)$/i, actions: ["抓个页面","拉取一下","fetch 中","扒拉网页","取点内容","抓取资料","扒一下","拉一下","打开看看"] },
 	{ test: /^(mcp)$/i, actions: ["mcp 连一下","调个服务","接个工具","mcp 走你","调接口","连一下","调个工具","喊外援","接一下","问问插件"] },
 	{ test: /^(recall)$/i, actions: ["回想一下","回忆中","提取记忆","想起啥了","记起来","翻翻记忆","想想之前"] },
 	{ test: /^(subagent|agent|task)$/i, actions: ["派个小弟","小助手出动","支个 agent","让小弟跑腿","代理干活","子任务起飞","分个任务","交给小弟","派出去"] },
@@ -137,8 +168,6 @@ const ACTION_MAP: Array<{ test: RegExp; actions: string[] }> = [
 	{ test: /^(ctx_stats|ctx_doctor|ctx_upgrade|ctx_purge|ctx_insight)$/i, actions: ["统计一下","上下文统计","ctx 状态","看个状态","统计中","看看数目","看看状态","诊断一下","查一下"] },
 	{ test: /^(ask_user_question|ask)$/i, actions: ["提问中","问一个问题","ask 一下","请教一下","问问看","问一问","问你个事","确认一下","问问你"] },
 	{ test: /^(goal_complete|goal_blocked)$/i, actions: ["定个目标","设定目标","goal 设置","目标走起","规划一下","目标确认","标记目标","更新进度","打个勾"] },
-	{ test: /^(manage_todo_list)$/i, actions: ["列个待办","写个清单","todo 安排","记一下","待办走起","清单一下","划个清单","记个待办"] },
-	{ test: /^(subagent|workflow|orchestrat)/i, actions: ["派个小弟","小助手出动","支个 agent","让小弟跑腿","代理干活","子任务起飞","分个任务","交给小弟","派出去"] },
 ];
 
 /** 思考文案池：短、口语、俏皮 */
@@ -304,6 +333,12 @@ const RARE_PHRASES = [
 	"你发现我了",
 ];
 const RARE_CHANCE = 1 / 150;
+/** 工具失败文案池 */
+const FAIL_PHRASES = [
+	"翻车了","哎呀","掉了","没跑通","摔了一跤","再来一次","这不对",
+	"出岔子了","不灵了","坏消息","权限不对？","连不上？","404了",
+	"空了我","有点问题","回头再看看","没接住","漏了","重试一次",
+];
 /** 收尾文案池 */
 const DONE_PHRASES = ["交差！","搞定，下一个","好了，收工","done！","完成啦","交作业","结束，完美","完工咯","搞定啦","任务完成","好了，歇会儿","搞定","收工","妥了","完事","交差","done","齐活","拿下"];
 /** 打断后再启动接梗 */
@@ -325,7 +360,7 @@ const WAITING_PHRASES = [
 	"等它出字",
 	"别急，在等",
 	"它磨蹭呢",
-	"模型说���下",
+	"模型说等一下",
 	"等它滴一声",
 	"模型在咕噜",
 	"等它反应过来",
@@ -340,6 +375,63 @@ const WAITING_PHRASES = [
 const WAITING_PHRASE_TICKS = 15; // ~2.6s 换一句
 /** 周末问候 */
 const WEEKEND_PHRASES = ["周末摸鱼中","周末也在！","放假也陪你","周末不关机","周末偷着盘","周末也在卷？","卷王你好","还在加班…"];
+
+/** 节假日文案池（按日期匹配，命中后取代思考池一次） */
+const HOLIDAY_PHRASES: Record<string, string[]> = {
+	"01-01": ["新年快乐！","元旦快乐","新的一年，新的 bug","新年第一盘","开工大吉"],
+	"02-14": ["情人节也在敲代码","代码才是真爱","今天不约会？","bug 也是 love"],
+	"04-01": ["愚人节快乐","这个 bug 是假的吧","小心假报错","今天谁骗我"],
+	"05-01": ["劳动节还在卷","劳动最光荣","打工人打工魂"],
+	"06-01": ["儿童节快乐","谁还不是个宝宝","今天代码要写得可爱"],
+	"10-31": ["万圣节快乐","不给糖就捣蛋","🎃 南瓜来了"],
+	"12-24": ["平安夜快乐","圣诞老人来了","🎄 今晚写代码有礼物"],
+	"12-25": ["圣诞快乐","Merry Christmas","🎅 圣诞也陪你","圣诞限定彩蛋"],
+	"12-31": ["跨年夜","新年倒计时","今年最后一盘","🍾 准备跨年"],
+};
+/** 农历春节——这里按公历近似（2025–2027），再往后加 */
+const LUNAR_NEW_YEAR_PHRASES = ["🧧 春节快乐！","过年还在写代码","红包拿来","新春快乐","拜年了","过年好","代码也拜个年"];
+/** 公历日 → 春节标记（逐年加） */
+const LUNAR_NEW_YEAR_DAYS: Record<string, true> = {
+	"2025-01-29": true, "2025-01-30": true, "2025-01-31": true, "2025-02-01": true, "2025-02-02": true, "2025-02-03": true, "2025-02-04": true,
+	"2026-02-17": true, "2026-02-18": true, "2026-02-19": true, "2026-02-20": true, "2026-02-21": true, "2026-02-22": true, "2026-02-23": true,
+	"2027-02-06": true, "2027-02-07": true, "2027-02-08": true, "2027-02-09": true, "2027-02-10": true, "2027-02-11": true, "2027-02-12": true,
+};
+/** 模型切换梗 */
+const MODEL_QUIPS: Record<string, string[]> = {
+	"claude": ["Claude 来了","换 Claude 了","让 Claude 试试","Claude 出战"],
+	"gpt": ["GPT 来了","换个 GPT","GPT 出战"],
+	"grok": ["Grok 来了","Grok 出战","Grok 硬核"],
+	"gemini": ["Gemini 来了","Gemini 出战","Google 选手"],
+	"deepseek": ["DeepSeek 来了","DeepSeek 出战","国产选手"],
+	"haiku": ["Haiku 快枪手","Haiku 来了","短平快模式"],
+	"sonnet": ["Sonnet 来了","Sonnet 出战","文采担当"],
+	"opus": ["Opus 来了","Opus 出战","放大招"],
+	"flash": ["Flash 来了","闪电模式","快快快"],
+	"pro": ["Pro 来了","Pro 出战","专业模式"],
+	"mini": ["Mini 来了","Mini 轻装上阵","小模型也够用"],
+};
+
+/** 检测是否为节假日，返回对应文案（null = 不是） */
+function holidayPhrase(): string | null {
+	const now = new Date();
+	const mmdd = `${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+	const ymd = `${now.getFullYear()}-${mmdd}`;
+	// 春节优先
+	if (LUNAR_NEW_YEAR_DAYS[ymd]) return pick(LUNAR_NEW_YEAR_PHRASES);
+	// 固定节日
+	const pool = HOLIDAY_PHRASES[mmdd];
+	if (pool) return pick(pool);
+	return null;
+}
+
+/** 根据模型名吐一句梗 */
+function modelQuip(modelId: string): string | null {
+	const lower = modelId.toLowerCase();
+	for (const [key, quips] of Object.entries(MODEL_QUIPS)) {
+		if (lower.includes(key)) return pick(quips);
+	}
+	return null;
+}
 
 const COMBO_THRESHOLD = 5;
 /** 慢工具预警阈值 */
@@ -374,6 +466,18 @@ function fmtTime(ms: number): string {
 	const h = Math.floor(m / 60);
 	const rm = m % 60;
 	return `${h}h${rm}m`;
+}
+
+/** 流式 delta 没有 usage，只能按中英文字符粗估 token 数。 */
+function estimateTokens(text: string): number {
+	const compact = text.replace(/\s/g, "");
+	if (!compact) return 0;
+	const cjkCount = (compact.match(/[\u3400-\u9fff]/g) ?? []).length;
+	return Math.max(1, Math.ceil(cjkCount * 1.5 + (compact.length - cjkCount) / 4));
+}
+
+function isSubagentTool(toolName: string): boolean {
+	return /^(subagent|agent|task)$/i.test(toolName.trim());
 }
 
 /** 随机抽一条，尽量不与上次相同 */
@@ -453,7 +557,12 @@ function detailFor(toolName: string, args: unknown): string {
 	const url = str("url");
 	if (url) return short(url, 40);
 	const prompt = str("prompt", "description");
-	if (prompt && /subagent|agent|task/i.test(toolName)) return short(prompt, 40);
+	// subagent: 优先用 description（短标签），其次 prompt（截断）
+	if (/subagent|agent|task/i.test(toolName)) {
+		const desc = str("description");
+		if (desc) return short(desc, 32);
+		if (prompt) return short(prompt, 40);
+	}
 	const name = str("name", "server", "tool", "id", "goal");
 	if (name) return short(name, 32);
 
@@ -461,8 +570,13 @@ function detailFor(toolName: string, args: unknown): string {
 	return base === toolName ? "" : short(base, 28);
 }
 
-function summarize(toolName: string, args: unknown): string {
-	const action = actionFor(toolName);
+function summarize(toolName: string, args: unknown, customActions?: Record<string, string[]>): string {
+	const normalizedName = toolName.trim().toLowerCase();
+	// 自定义映射按工具名精确匹配；不把用户配置当正则执行。
+	const customAction = customActions
+		? Object.entries(customActions).find(([name]) => name.toLowerCase() === normalizedName)?.[1]
+		: undefined;
+	const action = customAction ? pick(customAction) : actionFor(toolName);
 	const detail = detailFor(toolName, args);
 	if (!detail) return action;
 	return `${action} ${detail}`;
@@ -571,7 +685,13 @@ const FAST_TOOL_MS = 1500;
 const QUEUE_MAX = 6;
 
 
-type ActiveTool = { id: string; name: string; label: string; startedAt: number };
+type ActiveTool = {
+	id: string;
+	name: string;
+	label: string;
+	startedAt: number;
+	isSubagent: boolean;
+};
 /** 完成队列项：带成功/失败标记 */
 type DoneItem = { label: string; isError: boolean };
 
@@ -634,6 +754,8 @@ export default function (pi: ExtensionAPI) {
 	let agentStartMs = 0;
 	/** 完成闪现计时 */
 	let doneTimer: ReturnType<typeof setTimeout> | null = null;
+	/** 空闲模型梗闪现计时 */
+	let modelTimer: ReturnType<typeof setTimeout> | null = null;
 	/** 打断接梗文案显示截止时间 */
 	let continueUntil = 0;
 	/** 上下文预警：当前用量百分比（达到阈值时非空） */
@@ -641,6 +763,25 @@ export default function (pi: ExtensionAPI) {
 	let lastContextCheckMs = 0;
 	/** random 模式：本轮解析后的预设（一轮只随一次） */
 	let resolvedPreset: string | null = null;
+	/** 会话总启动时间（用于连续工作提醒） */
+	let sessionStartMs = 0;
+	/** 当前模型名（用于 model_select 梗） */
+	let currentModelId = "";
+	/** tps 计算：来自 text_delta 的近似 token 累加 */
+	let tokBucket = 0;
+	let tokBucketStartMs = 0;
+	/** 最近一次文本流式增量，用于清除陈旧速率 */
+	let lastTextDeltaMs = 0;
+	/** 当前瞬时估算 tps（非零时显示） */
+	let currentTps = 0;
+	/** 本轮是否已触发节假日文案 */
+	let holidayShown = false;
+	/** 会话内累计活跃时长与已发提醒次数 */
+	let sessionActiveMs = 0;
+	let workRemindCount = 0;
+	/** 本轮子代理总数与最高连击 */
+	let subagentTotal = 0;
+	let maxStreak = 0;
 
 	const applyFrames = (ctx: ExtensionContext) => {
 		if (config.frames === "random") {
@@ -665,10 +806,19 @@ export default function (pi: ExtensionAPI) {
 		if (continueUntil > 0 && Date.now() < continueUntil) return;
 		if (continueUntil > 0) continueUntil = 0;
 		const list = [...active.values()];
-		// 上下文预警前缀
+		// 上下文预警前缀（分级）
+		const warnAt = config.contextWarnAt ?? 80;
+		const dangerAt = Math.max(warnAt, config.contextDangerAt ?? 95);
 		const ctxWarn =
 			contextWarnPct != null
-				? theme.fg("warning", `⚠ 上下文${contextWarnPct}% · `)
+				? (contextWarnPct >= dangerAt
+					? theme.fg("error", `⚠ 上下文${contextWarnPct}% · `)
+					: theme.fg("warning", `⚠ 上下文${contextWarnPct}% · `))
+				: "";
+		// Pi 的 text_delta 不带 token usage，这里明确展示为估算速率。
+		const tpsPrefix =
+			config.showTokPerSec && currentTps > 0 && list.length === 0 && Date.now() - lastTextDeltaMs < 3_500
+				? theme.fg("dim", `~${currentTps} tok/s · `)
 				: "";
 
 		if (list.length === 0) {
@@ -680,7 +830,7 @@ export default function (pi: ExtensionAPI) {
 				now - narratedAtMs < NARRATE_MIN_MS
 			) {
 				ctx.ui.setWorkingMessage(
-					shimmer(narratedStatus, tick, accentHex, ctx) +
+					ctxWarn + tpsPrefix + shimmer(narratedStatus, tick, accentHex, ctx) +
 					theme.fg("dim", DOT_FRAMES[Math.floor(tick / 3) % DOT_FRAMES.length]!),
 				);
 				return;
@@ -697,9 +847,10 @@ export default function (pi: ExtensionAPI) {
 				const mark = showingDone.item.isError
 					? theme.fg("error", " ✗")
 					: theme.fg("success", " ✓");
-				ctx.ui.setWorkingMessage(
-					shimmer(showingDone.item.label, tick, accentHex, ctx) + mark,
-				);
+				const label = showingDone.item.isError
+					? theme.fg("error", showingDone.item.label)
+					: shimmer(showingDone.item.label, tick, accentHex, ctx);
+				ctx.ui.setWorkingMessage(label + mark);
 				return;
 			}
 			// 队列空了：最后一个粘留 3s
@@ -707,9 +858,10 @@ export default function (pi: ExtensionAPI) {
 				const mark = lastSticky.item.isError
 					? theme.fg("error", " ✗")
 					: theme.fg("success", " ✓");
-				ctx.ui.setWorkingMessage(
-					shimmer(lastSticky.item.label, tick, accentHex, ctx) + mark,
-				);
+				const label = lastSticky.item.isError
+					? theme.fg("error", lastSticky.item.label)
+					: shimmer(lastSticky.item.label, tick, accentHex, ctx);
+				ctx.ui.setWorkingMessage(label + mark);
 				return;
 			}
 			// 还没收到第一个 token：轮换等待文案（~2.6s 换一句）
@@ -720,7 +872,7 @@ export default function (pi: ExtensionAPI) {
 				}
 				const dots = DOT_FRAMES[Math.floor(tick / 3) % DOT_FRAMES.length]!;
 				ctx.ui.setWorkingMessage(
-					ctxWarn +
+					ctxWarn + tpsPrefix +
 					shimmer(waitingPhrase, tick, accentHex, ctx) + theme.fg("dim", dots),
 				);
 				return;
@@ -729,6 +881,7 @@ export default function (pi: ExtensionAPI) {
 			if (config.narrate && narratedStatus) {
 				if (now - lastActivityMs < NARRATE_GRACE_MS) {
 					ctx.ui.setWorkingMessage(
+						ctxWarn + tpsPrefix +
 						shimmer(narratedStatus, tick, accentHex, ctx) +
 						theme.fg("dim", DOT_FRAMES[Math.floor(tick / 3) % DOT_FRAMES.length]!),
 					);
@@ -743,9 +896,14 @@ export default function (pi: ExtensionAPI) {
 				// 只在换文案时重新评估池子，而不是每 tick 都算（否则彩蛋 170ms 就被覆盖）
 				const elapsed = agentStartMs > 0 ? Date.now() - agentStartMs : 0;
 				let pool: string[];
-				if (!weekendShown && [0, 6].includes(new Date().getDay())) {
+				const holiday = !holidayShown ? holidayPhrase() : null;
+				if (holiday) {
+					holidayShown = true;
+					pool = [holiday];
+					isRarePhrase = true; // 节假日也用炫彩
+				} else if (!weekendShown && [0, 6].includes(new Date().getDay())) {
 					pool = [pick(WEEKEND_PHRASES)];
-				weekendShown = true;
+					weekendShown = true;
 					isRarePhrase = false;
 				} else if (Math.random() < RARE_CHANCE && elapsed < THINKING_TIER_30S) {
 					pool = RARE_PHRASES;
@@ -772,7 +930,7 @@ export default function (pi: ExtensionAPI) {
 			const dots = DOT_FRAMES[Math.floor(tick / 3) % DOT_FRAMES.length]!;
 			const total = agentStartMs > 0 ? fmtTime(Date.now() - agentStartMs) : "";
 			ctx.ui.setWorkingMessage(
-				ctxWarn +
+				ctxWarn + tpsPrefix +
 				(isRarePhrase
 					? rainbowShimmer(thinkingPhrase, tick, ctx)
 					: shimmer(thinkingPhrase, tick, accentHex, ctx)) +
@@ -788,6 +946,10 @@ export default function (pi: ExtensionAPI) {
 				? theme.fg("dim", ` ${Math.floor(elapsed / 1000)}s`)
 				: "";
 		const more = list.length > 1 ? theme.fg("dim", ` · 另 ${list.length - 1} 项`) : "";
+		// 子代理并行提示：只统计当前仍在执行的子代理。
+		const activeSubagentCount = list.filter((tool) => tool.isSubagent).length;
+		const subHint =
+			activeSubagentCount > 1 ? theme.fg("dim", ` · 小弟×${activeSubagentCount}`) : "";
 		// combo 连击前缀 / 慢工具预警
 		const combo =
 			streak >= COMBO_THRESHOLD ? theme.fg("warning", `火力全开×${streak} · `) : "";
@@ -811,13 +973,14 @@ export default function (pi: ExtensionAPI) {
 						shimmer(narratedStatus!, tick, accentHex, ctx) +
 						theme.fg("dim", ` · ${cur.label}`) +
 						secs +
-						more,
+						more +
+						subHint,
 				);
 				return;
 			}
 
 			ctx.ui.setWorkingMessage(
-				ctxWarn + combo + slow + shimmer(cur.label, tick, accentHex, ctx) + secs + more,
+				ctxWarn + combo + slow + shimmer(cur.label, tick, accentHex, ctx) + secs + more + subHint,
 			);
 	};
 
@@ -828,18 +991,42 @@ export default function (pi: ExtensionAPI) {
 			tick++;
 			thinkingPhraseTick++;
 			waitingPhraseTick++;
-			// 思考/干活耗时拆分
+			// 思考/干活耗时拆分，同时累计会话内实际活跃时间。
 			if (active.size > 0) toolMs += TICK_MS;
 			else thinkingMs += TICK_MS;
+			sessionActiveMs += TICK_MS;
 			if (active.size > 1 && tick % Math.round(ROTATE_MS / TICK_MS) === 0) {
 				rotateIdx++;
 			}
 			// 上下文用量检查：每 ~3s 一次（getContextUsage 是廉价 getter）
 			const warnAt = config.contextWarnAt ?? 80;
-			if (warnAt > 0 && Date.now() - lastContextCheckMs > 3000) {
+			if (warnAt <= 0) {
+				contextWarnPct = null;
+			} else if (Date.now() - lastContextCheckMs > 3000) {
 				lastContextCheckMs = Date.now();
 				const pct = ctx.getContextUsage()?.percent;
 				contextWarnPct = typeof pct === "number" && pct >= warnAt ? Math.round(pct) : null;
+			}
+			// tps 计算：只在文本仍持续流入时显示，避免把旧值带到下一阶段。
+			if (lastTextDeltaMs > 0 && Date.now() - lastTextDeltaMs >= 3_500) {
+				currentTps = 0;
+				tokBucket = 0;
+				tokBucketStartMs = 0;
+			} else if (config.showTokPerSec && tokBucketStartMs > 0 && Date.now() - tokBucketStartMs >= 3000) {
+				const elapsed = (Date.now() - tokBucketStartMs) / 1000;
+				currentTps = elapsed > 0 ? Math.round(tokBucket / elapsed) : 0;
+				tokBucket = 0;
+				tokBucketStartMs = Date.now();
+			}
+			// 累计活跃 N 小时提醒；空闲时间不计入，避免会话挂着就误报。
+			const remindAt = config.workRemindAt ?? 3;
+			const remindEveryMs = remindAt * 3_600_000;
+			if (remindEveryMs > 0 && sessionActiveMs >= (workRemindCount + 1) * remindEveryMs) {
+				workRemindCount++;
+				ctx.ui.notify(
+					`☕ 累计活跃 ${fmtTime(sessionActiveMs)}，起来喝口水吧`,
+					"info",
+				);
 			}
 			render(ctx);
 		}, TICK_MS);
@@ -854,6 +1041,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_e, ctx) => {
 		ctx.ui.setStatus(DONE_STATUS_KEY, undefined);
+		ctx.ui.setStatus(MODEL_STATUS_KEY, undefined);
 		// debug 日志防无限增长：新会话截断到 512KB
 		if (config.debugLog) {
 			try {
@@ -890,12 +1078,28 @@ export default function (pi: ExtensionAPI) {
 		waitingPhraseTick = 0;
 		continueUntil = 0;
 		resolvedPreset = null;
+		sessionStartMs = Date.now();
+		currentModelId = "";
+		tokBucket = 0;
+		tokBucketStartMs = 0;
+		lastTextDeltaMs = 0;
+		currentTps = 0;
+		holidayShown = false;
+		sessionActiveMs = 0;
+		workRemindCount = 0;
+		subagentTotal = 0;
+		maxStreak = 0;
 		if (doneTimer) {
 			clearTimeout(doneTimer);
 			doneTimer = null;
 		}
+		if (modelTimer) {
+			clearTimeout(modelTimer);
+			modelTimer = null;
+		}
 		stopTick();
 		config = readConfig();
+		if (!fs.existsSync(configPath())) writeConfig(config);
 		accentHex = accentHexOf(ctx);
 		applyFrames(ctx);
 		ctx.ui.setWorkingMessage(undefined);
@@ -916,6 +1120,8 @@ export default function (pi: ExtensionAPI) {
 		thinkingMs = 0;
 		toolMs = 0;
 		streak = 0;
+		maxStreak = 0;
+		subagentTotal = 0;
 		lastToolEndMs = 0;
 		narratedStatus = null;
 		narratedAtMs = 0;
@@ -923,6 +1129,11 @@ export default function (pi: ExtensionAPI) {
 		recentText = "";
 		resolvedPreset = null; // 新一轮 random 重新随
 		agentStartMs = Date.now();
+		tokBucket = 0;
+		tokBucketStartMs = 0;
+		lastTextDeltaMs = 0;
+		currentTps = 0;
+		holidayShown = false;
 		ctx.ui.setStatus(DONE_STATUS_KEY, undefined);
 		if (doneTimer) {
 			clearTimeout(doneTimer);
@@ -957,13 +1168,17 @@ export default function (pi: ExtensionAPI) {
 		const nowMs = Date.now();
 		if (active.size > 0 || (lastToolEndMs > 0 && nowMs - lastToolEndMs < 2500)) streak++;
 		else streak = 1;
+		maxStreak = Math.max(maxStreak, streak);
 		const id = String(event.toolCallId ?? event.toolName ?? Math.random());
 		const name = String(event.toolName ?? "tool");
+		const isSubagent = isSubagentTool(name);
+		if (isSubagent) subagentTotal++;
 		active.set(id, {
 			id,
 			name,
-			label: summarize(name, event.args),
+			label: summarize(name, event.args, config.customActions),
 			startedAt: Date.now(),
+			isSubagent,
 		});
 		applyFrames(ctx);
 		render(ctx);
@@ -992,8 +1207,22 @@ export default function (pi: ExtensionAPI) {
 			dbg("tool_end", { name: finished.name, fast, isError, queued: fast || isError });
 			// 快工具入队重播；出错工具不管快慢都入队（需要被看到）
 			if (fast || isError) {
-				doneQueue.push({ label: finished.label, isError });
-				if (doneQueue.length > QUEUE_MAX) doneQueue.shift();
+				const item = {
+					label: isError ? `${pick(FAIL_PHRASES)} · ${finished.label}` : finished.label,
+					isError,
+				};
+				// 错误不能被先前成功项压住；抢占队列，下一帧就展示。
+				if (isError) {
+					showingDone = null;
+					lastSticky = null;
+					doneQueue.unshift(item);
+				} else {
+					doneQueue.push(item);
+				}
+				if (doneQueue.length > QUEUE_MAX) {
+					const oldestSuccess = doneQueue.findIndex((queued) => !queued.isError);
+					doneQueue.splice(oldestSuccess >= 0 ? oldestSuccess : doneQueue.length - 1, 1);
+				}
 			}
 		}
 		if (active.size === 0) rotateIdx = 0;
@@ -1008,11 +1237,15 @@ export default function (pi: ExtensionAPI) {
 			dbg("msg_update", { type: evt.type }); // 流式 delta 太高频，不记
 		}
 		if (evt.type === "text_delta") {
+			const delta = typeof evt.delta === "string" ? evt.delta : "";
 			firstTokenSeen = true;
 			lastActivityMs = Date.now();
-			if (!config.narrate) return; // 开关关：不解析自述
-			const delta = evt.delta as string;
-			if (!delta) return;
+			if (delta && config.showTokPerSec) {
+				if (!tokBucketStartMs) tokBucketStartMs = lastActivityMs;
+				tokBucket += estimateTokens(delta);
+				lastTextDeltaMs = lastActivityMs;
+			}
+			if (!config.narrate || !delta) return; // 开关关：不解析自述
 			recentText = (recentText + delta).slice(-2000);
 			// 提取最新的 ⏵ 状态行
 			const lines = recentText.split("\n");
@@ -1041,15 +1274,39 @@ export default function (pi: ExtensionAPI) {
 		if (typeof out === "number" && out > 0) outputTokens += out;
 	});
 
-	pi.on("context", async (event, _ctx) => {
-		if (!config.narrate) return; // 开关关：不注入约定
-		// 注入状态栏约定：让模型在调工具前写一行 ⏵ 短语
-		return {
-			messages: [
-				...event.messages,
-				{ role: "developer", content: NARRATE_INSTRUCTION },
-			],
-		};
+	pi.on("model_select", async (event, ctx) => {
+		currentModelId = `${event.model.provider}/${event.model.id}`;
+		const quip = modelQuip(currentModelId);
+		if (!quip) return;
+		if (busy) {
+			ctx.ui.setWorkingMessage(ctx.ui.theme.fg("accent", quip));
+			continueUntil = Date.now() + 1500;
+			return;
+		}
+		if (modelTimer) clearTimeout(modelTimer);
+		ctx.ui.setStatus(MODEL_STATUS_KEY, ctx.ui.theme.fg("accent", quip));
+		modelTimer = setTimeout(() => {
+			modelTimer = null;
+			ctx.ui.setStatus(MODEL_STATUS_KEY, undefined);
+		}, 1500);
+	});
+
+	pi.on("before_agent_start", async (event, _ctx) => {
+		if (!config.narrate) return;
+		// developer role 不是 Pi 的会话消息类型；追加到系统提示才会实际送入模型。
+		return { systemPrompt: `${event.systemPrompt}\n\n${NARRATE_INSTRUCTION}` };
+	});
+
+	pi.on("turn_start", async (_event, _ctx) => {
+		// 每轮工具返回后会重新向模型请求；旧轮次的 token/自述不能污染等待态。
+		firstTokenSeen = false;
+		waitingPhrase = null;
+		waitingPhraseTick = WAITING_PHRASE_TICKS;
+		narratedStatus = null;
+		currentTps = 0;
+		tokBucket = 0;
+		tokBucketStartMs = 0;
+		lastTextDeltaMs = 0;
 	});
 
 	pi.on("agent_end", async (event, ctx) => {
@@ -1115,7 +1372,7 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
-	pi.on("session_shutdown", async () => {
+	pi.on("session_shutdown", async (_event, ctx) => {
 		busy = false;
 		active.clear();
 		doneQueue.length = 0;
@@ -1125,12 +1382,14 @@ export default function (pi: ExtensionAPI) {
 		waitingPhrase = null;
 		waitingPhraseTick = 0;
 		if (doneTimer) clearTimeout(doneTimer);
+		if (modelTimer) clearTimeout(modelTimer);
+		ctx.ui.setStatus(MODEL_STATUS_KEY, undefined);
 	});
 
 	// ─── /activity 命令 ──────────────────────────────────────────
 
 	pi.registerCommand("activity", {
-		description: "Working 行：/activity 选动画 · /activity frames <名> · /activity narrate on|off",
+		description: "Working 行：/activity [status|warn|danger|tps|remind|phrase|stats|frames|narrate]",
 		handler: async (args, ctx) => {
 			const apply = (name: string) => {
 				config = { ...config, frames: name };
@@ -1140,6 +1399,129 @@ export default function (pi: ExtensionAPI) {
 			};
 
 			const parts = args.trim().split(/\s+/).filter(Boolean);
+
+			// /activity status — 显示当前配置
+			if (parts[0] === "status") {
+				const lines = [
+					`🎨 动画预设：${config.frames}`,
+					`📝 模型自述：${config.narrate ? "开" : "关"}`,
+					`⚠ 上下文预警：${config.contextWarnAt ?? 80}%`,
+					`🚨 危险阈值：${config.contextDangerAt ?? 95}%`,
+					`⚡ ~tok/s 显示：${config.showTokPerSec ? "开" : "关"}`,
+					`☕ 工作提醒：${(config.workRemindAt ?? 3) > 0 ? `${config.workRemindAt ?? 3}h` : "关"}`,
+					`🔧 自定义映射：${config.customActions ? Object.keys(config.customActions).join(", ") : "无"}`,
+					`💬 自定义短语：${config.customPhrases?.length ?? 0} 条`,
+				];
+				ctx.ui.notify(lines.join(" · "), "info");
+				return;
+			}
+
+			// /activity warn <n> — 修改上下文预警阈值
+			if (parts[0] === "warn") {
+				const n = parseInt(parts[1] ?? "", 10);
+				if (isNaN(n) || n < 0 || n > 100) {
+					ctx.ui.notify("用法：/activity warn <0-100>，0=关闭预警", "warning");
+					return;
+				}
+				config = { ...config, contextWarnAt: n };
+				writeConfig(config);
+				ctx.ui.notify(
+					n === 0 ? "上下文预警已关闭" : `上下文预警阈值已设为 ${n}%`,
+					"info",
+				);
+				return;
+			}
+
+			// /activity danger <n> — 修改红色危险阈值
+			if (parts[0] === "danger") {
+				const n = parseInt(parts[1] ?? "", 10);
+				const warnAt = config.contextWarnAt ?? 80;
+				if (isNaN(n) || n < warnAt || n > 100) {
+					ctx.ui.notify(`用法：/activity danger <${warnAt}-100>`, "warning");
+					return;
+				}
+				config = { ...config, contextDangerAt: n };
+				writeConfig(config);
+				ctx.ui.notify(`上下文危险阈值已设为 ${n}%`, "info");
+				return;
+			}
+
+			// /activity tps on|off — 开关流式 token 估算速率
+			if (parts[0] === "tps") {
+				if (parts[1] !== "on" && parts[1] !== "off") {
+					ctx.ui.notify("用法：/activity tps on|off", "warning");
+					return;
+				}
+				const on = parts[1] === "on";
+				config = { ...config, showTokPerSec: on };
+				if (!on) {
+					currentTps = 0;
+					tokBucket = 0;
+					tokBucketStartMs = 0;
+				}
+				writeConfig(config);
+				ctx.ui.notify(on ? "~tok/s 显示已开启（流式估算）" : "~tok/s 显示已关闭", "info");
+				return;
+			}
+
+			// /activity remind <0-24> — 设置累计活跃提醒间隔
+			if (parts[0] === "remind") {
+				const hours = Number(parts[1]);
+				if (!Number.isFinite(hours) || hours < 0 || hours > 24) {
+					ctx.ui.notify("用法：/activity remind <0-24>，0=关闭", "warning");
+					return;
+				}
+				config = { ...config, workRemindAt: hours };
+				writeConfig(config);
+				ctx.ui.notify(hours === 0 ? "累计活跃提醒已关闭" : `每累计活跃 ${hours} 小时提醒一次`, "info");
+				return;
+			}
+
+			// /activity phrase add <文案> — 追加自定义思考短语
+			if (parts[0] === "phrase") {
+				if (parts[1] === "add" && parts.length > 2) {
+					const phrase = parts.slice(2).join(" ").trim();
+					if (phrase.length > 48) {
+						ctx.ui.notify("短语最长 48 个字符", "warning");
+						return;
+					}
+					if ((config.customPhrases ?? []).includes(phrase)) {
+						ctx.ui.notify("这条短语已经在池子里了", "info");
+						return;
+					}
+					config = {
+						...config,
+						customPhrases: [...(config.customPhrases ?? []), phrase],
+					};
+					writeConfig(config);
+					ctx.ui.notify(`已添加自定义短语：${phrase}`, "info");
+					return;
+				}
+				if (parts[1] === "list") {
+					const list = config.customPhrases ?? [];
+					ctx.ui.notify(
+						list.length > 0
+							? `自定义短语（${list.length}）：${list.join(" / ")}`
+							: "暂无自定义短语，用 /activity phrase add <文案> 添加",
+						"info",
+					);
+					return;
+				}
+				ctx.ui.notify("用法：/activity phrase add <文案> · /activity phrase list", "info");
+				return;
+			}
+
+			// /activity stats — 本轮统计
+			if (parts[0] === "stats") {
+				const thinkSec = Math.round(thinkingMs / 1000);
+				const toolSec = Math.round(toolMs / 1000);
+				const sessionHrs = sessionStartMs > 0 ? ((Date.now() - sessionStartMs) / 3_600_000).toFixed(1) : "0";
+				ctx.ui.notify(
+					`📊 本轮：${toolCount} 工具 · 想 ${thinkSec}s 干 ${toolSec}s · ${outputTokens} tok${currentTps > 0 ? ` · ~${currentTps} tok/s` : ""} · 连击峰值 ${maxStreak} · 子代理 ${subagentTotal} · 会话 ${sessionHrs}h`,
+					"info",
+				);
+				return;
+			}
 
 			// /activity narrate [on|off] — 模型自述开关
 			if (parts[0] === "narrate") {
