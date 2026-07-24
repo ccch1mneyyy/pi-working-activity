@@ -675,16 +675,33 @@ function shimmer(text: string, frame: number, baseHex: string | null, ctx: Exten
 	return out;
 }
 
-/** 炫彩流光：每个字独立色相，快速滚动 + 加粗，效果夸张 */
-function rainbowShimmer(text: string, frame: number, ctx: ExtensionContext): string {
-	let out = "";
-	for (let i = 0; i < text.length; i++) {
-		// 色相：字符偏移 + 快速滚动，饱和度拉满，亮度偏高
-		const hue = (i * 55 + frame * 14) % 360;
-		const [r, g, b] = hslToRgb(hue, 0.95, 0.58);
-		out += `\x1b[1;38;2;${r};${g};${b}m${text[i]}\x1b[0m`;
+/** 炫彩流光 v2：平滑色相梯度 + 亮度波浪呼吸 + 扫过高光带（带下划线） + 动态金边花饰 */
+function rainbowShimmer(text: string, frame: number): string {
+	const len = text.length;
+	// 两侧花饰：轮转 + 暖金呼吸
+	const SPARKLES = [`✦${TE}`, `✧${TE}`, `✶${TE}`, `✷${TE}`, `✦${TE}`, `✧${TE}`];
+	const sparkle = SPARKLES[Math.floor(frame / 2) % SPARKLES.length]!;
+	const goldL = 0.55 + Math.sin(frame * 0.25) * 0.15;
+	const [gr, gg, gb] = hslToRgb(46, 0.95, goldL);
+	const gold = `\x1b[1;38;2;${gr};${gg};${gb}m${sparkle}\x1b[0m`;
+
+	let out = `${gold} `;
+	// 高光扫过位置：从左侧场外扫到右侧场外（约 0.8 字/tick）
+	const sweep = ((frame * 0.8) % (len + 10)) - 5;
+	for (let i = 0; i < len; i++) {
+		// 色相：窄步长平滑梯度 + 慢速滚动（比旧版 55° 跳变更连贯）
+		const hue = (i * 26 + frame * 7) % 360;
+		// 亮度：横向波浪 + 整体呼吸 + 扫过高光
+		const wave = Math.sin(i * 0.7 - frame * 0.3) * 0.11;
+		const breathe = Math.sin(frame * 0.13) * 0.05;
+		const glow = Math.max(0, 1 - Math.abs(i - sweep) / 2.2);
+		const l = Math.min(0.88, Math.max(0.4, 0.56 + wave + breathe + glow * 0.3));
+		const [r, g, b] = hslToRgb(hue, 0.92, l);
+		// 高光带中心的字符加下划线，让“光扫过去”有实体感
+		const underline = glow > 0.55 ? "\x1b[4m" : "";
+		out += `${underline}\x1b[1;38;2;${r};${g};${b}m${text[i]}\x1b[0m`;
 	}
-	return out;
+	return `${out} ${gold}`;
 }
 
 /** HSL → RGB 转换（0-360, 0-1, 0-1 → 0-255） */
@@ -875,7 +892,7 @@ export default function (pi: ExtensionAPI) {
 		const fx = (text: string) =>
 			featureOn("shimmer") ? shimmer(text, tick, accentHex, ctx) : theme.fg("accent", text);
 		const fxRare = (text: string) =>
-			featureOn("shimmer") ? rainbowShimmer(text, tick, ctx) : theme.fg("accent", text);
+			featureOn("shimmer") ? rainbowShimmer(text, tick) : theme.fg("accent", text);
 
 		if (list.length === 0) {
 			const now = Date.now();
