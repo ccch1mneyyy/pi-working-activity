@@ -1092,7 +1092,7 @@ export default function (pi: ExtensionAPI) {
 				currentTps = 0;
 				tokBucket = 0;
 				tokBucketStartMs = 0;
-			} else if (config.showTokPerSec && tokBucketStartMs > 0 && Date.now() - tokBucketStartMs >= 3000) {
+			} else if (config.showTokPerSec && tokBucketStartMs > 0 && Date.now() - tokBucketStartMs >= 1500) {
 				const elapsed = (Date.now() - tokBucketStartMs) / 1000;
 				currentTps = elapsed > 0 ? Math.round(tokBucket / elapsed) : 0;
 				tokBucket = 0;
@@ -1365,11 +1365,11 @@ export default function (pi: ExtensionAPI) {
 	pi.on("model_select", async (event, ctx) => {
 		currentModelId = `${event.model.provider}/${event.model.id}`;
 		if (!featureOn("modelQuips")) return;
-		const quip = modelQuip(currentModelId);
-		if (!quip) return;
+		// 关键词命中用梗，否则保底显示模型名——切模型必有反馈
+		const quip = modelQuip(currentModelId) ?? `换模型了 · ${event.model.id}`;
 		if (busy) {
 			ctx.ui.setWorkingMessage(ctx.ui.theme.fg("accent", quip));
-			continueUntil = Date.now() + 1500;
+			continueUntil = Date.now() + 2500;
 			return;
 		}
 		if (modelTimer) clearTimeout(modelTimer);
@@ -1377,7 +1377,7 @@ export default function (pi: ExtensionAPI) {
 		modelTimer = setTimeout(() => {
 			modelTimer = null;
 			ctx.ui.setStatus(MODEL_STATUS_KEY, undefined);
-		}, 1500);
+		}, 2500);
 	});
 
 	pi.on("before_agent_start", async (event, _ctx) => {
@@ -1493,8 +1493,10 @@ export default function (pi: ExtensionAPI) {
 			// /activity status — 显示当前配置
 			if (parts[0] === "status") {
 				const overrides = Object.entries(config.features ?? {}).map(([k, v]) => `${k}:${v ? "开" : "关"}`);
+				const liveModel = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : (currentModelId || "未知");
 				const lines = [
 					`🎭 模式：${config.mode ?? "lively"}`,
+					`🤖 当前模型：${liveModel}`,
 					`🎨 动画预设：${config.frames}`,
 					`📝 模型自述：${config.narrate ? "开" : "关"}`,
 					`⚠ 上下文预警：${config.contextWarnAt ?? 80}%`,
