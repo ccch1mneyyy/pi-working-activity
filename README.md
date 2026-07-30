@@ -122,6 +122,32 @@ Pi 的流式事件不提供逐段 usage，因此这是实时估算值；收尾�
 ### ☕ 累计活跃提醒
 默认每累计活跃 3 小时弹一次提示，提醒喝水休息。只有 agent 真正运行的时间计入；`workRemindAt: 0` 关闭，或改成其他间隔（小时数）。
 
+### 💰 成本与 token 核算
+每轮结束时（≥3s）在通知里追加本轮成本和 token 总量，直接读 Pi 官方核算的 `usage.cost.total`——和你的账单一致，不是估算。
+
+```
+⏱ 总用时 2m12s · 15 工具 · 想 123s 干 6s · 💰 $0.087 · 🔥 34.2k tok
+```
+
+`/activity stats` 查看更详细的分项：本轮 / 会话累计花费、缓存命中率、思考 token。
+
+| 字段 | 来源 |
+|------|------|
+| 💰 成本 | Pi 官方 `usage.cost.total`（含缓存折扣、阶梯价） |
+| 🔥 token | input + output + cacheRead + cacheWrite |
+| 缓存命中 | cacheRead / (input + cacheRead) |
+| 🧠 思考 | reasoning token（output 的子集，不重复计费） |
+
+### 🗜️ 上下文压缩感知
+监听 `session_compact` 事件，上下文被压缩时闪现一条通知——和上下文预警形成完整闭环：警告 → 压缩 → 恢复。
+
+```
+🗜️ 上下文已压缩 · 45.0k→12.0k tok · 腾出 73%
+🗜️ 溢出自动压缩 · 45.0k→12.0k tok · 腾出 73% · 将重试
+```
+
+压缩调用的成本也会自动累计到本轮/会话统计。
+
 ### 🔧 自定义工具映射
 `customActions` 让你为自己的工具/MCP 定义文案映射，按工具名精确匹配（不执行配置中的正则）：
 
@@ -210,7 +236,7 @@ pi install npm:pi-working-activity
 | `/activity remind <0-24>` | 设置累计活跃提醒间隔，0=关闭 |
 | `/activity phrase add <文案>` | 追加自定义思考短语 |
 | `/activity phrase list` | 列出所有自定义短语 |
-| `/activity stats` | 本轮统计：工具数、想/干比、tps、会话时长 |
+| `/activity stats` | 本轮+会话统计：工具数、想/干比、💰成本、🔥token、缓存命中、思考 token |
 
 ## 模型自述原理
 

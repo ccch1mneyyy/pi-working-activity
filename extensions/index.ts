@@ -114,6 +114,7 @@ const FEATURE_FLAGS = [
 	"modelQuips",       // 模型切换梗
 	"shimmer",          // 文案星辉扫过/彩虹流光
 	"continuePhrases",  // 打断后接梗
+	"cost",             // 成本与 token 核算（结束时展示）
 ] as const;
 
 /** 设置面板里的中文标签 */
@@ -128,6 +129,7 @@ const FEATURE_LABELS: Record<(typeof FEATURE_FLAGS)[number], string> = {
 	modelQuips: "模型切换梗",
 	shimmer: "星辉效果",
 	continuePhrases: "打断接梗",
+	cost: "成本与 token",
 };
 
 /** minimal 模式的朴素文案 */
@@ -340,14 +342,23 @@ const THINKING_PHRASES = [
 	"hhh",
 	"emm",
 	"emmm",
+	"CPU烧了",
+	"让我打个log看看",
+	"先跑一下试试",
+	"定位一下",
+	"排查一下",
+	"看看日志",
+	"抓个包看看",
+	"loading 99%",
+	"让我捋一下逻辑",
 ];
 
 /** 想久了 30s 档 */
-const THINKING_PHRASES_30S = ["嗯，让我细想想","30秒了，还在盘","等下，快好了","别急，就快出结果了","让我再捋一捋","嗯…思路没断","30秒，快了","等等，有眉目了","有点久…","转圈圈…","马上马上"];
+const THINKING_PHRASES_30S = ["嗯，让我细想想","30秒了，还在盘","等下，快好了","别急，就快出结果了","让我再捋一捋","嗯…思路没断","30秒，快了","等等，有眉目了","有点久…","转圈圈…","马上马上","快了快了","别走，就快好了","在盘了呢","还在定位","快复现了"];
 /** 想久了 1min 档 */
-const THINKING_PHRASES_1M = ["1分钟，还在想","这题有点东西","让我再钻研下","嗯…问题不简单","1分钟，别走开","盘得有点深","脑细胞在燃烧","等等，快盘清了","还在努力…","这个有点绕…","烧脑中…"];
+const THINKING_PHRASES_1M = ["1分钟，还在想","这题有点东西","让我再钻研下","嗯…问题不简单","1分钟，别走开","盘得有点深","脑细胞在燃烧","等等，快盘清了","还在努力…","这个有点绕…","烧脑中…","别走，快了","一分钟了，再等等","这题值得盘","还在排查","这个有点复杂"];
 /** 想久了 5min 档 */
-const THINKING_PHRASES_5M = ["5分钟，大工程","这把我得认真","确实有点绕","等等，我在修仙","快好了，真的","盘了一大圈","别慌，在收尾","给我一首歌的时间","还没放弃…","这题真的硬…","我给跪了…"];
+const THINKING_PHRASES_5M = ["5分钟，大工程","这把我得认真","确实有点绕","等等，我在修仙","快好了，真的","盘了一大圈","别慌，在收尾","给我一首歌的时间","还没放弃…","这题真的硬…","我给跪了…","憋大招中","5分钟了，等值了","快了，真快了","PM说这个很急","这个需求很简单","能跑就别动","先上线再说"];
 const THINKING_TIER_30S = 30_000;
 const THINKING_TIER_1M = 60_000;
 const THINKING_TIER_5M = 300_000;
@@ -364,8 +375,13 @@ const NIGHT_PHRASES = [
 	"熬夜冠军上线",
 	"困了，但能行",
 	"过了零点照样肝",
-	"熬夜冠军",
 	"夜猫子出没",
+	"深夜档营业",
+	"星星都睡了",
+	"凌晨还在盘",
+	"深夜上线",
+	"凌晨部署",
+	"通宵了",
 ];
 /** 稀有彩蛋（1/150，七彩流光） */
 const RARE_PHRASES = [
@@ -402,20 +418,30 @@ const RARE_PHRASES = [
 	"ez",
 	"暴击了",
 	"wink ~",
-	"摸鱼ing",
 	"你发现我了",
+	"欧皇降临",
+	"隐藏款！",
+	"稀有度 MAX",
+	"一次过！",
+	"没bug",
+	"完美运行",
+	"测试全绿",
+	"这波在大气层",
 ];
 const RARE_CHANCE = 1 / 150;
 /** 工具失败文案池 */
 const FAIL_PHRASES = [
 	"翻车了","哎呀","掉了","没跑通","摔了一跤","再来一次","这不对",
 	"出岔子了","不灵了","坏消息","权限不对？","连不上？","404了",
-	"空了我","有点问题","回头再看看","没接住","漏了","重试一次",
+	"不太对","有点问题","再看看","没接住","漏了","重试一次",
+	"我本地能跑啊","昨天还能跑","重启试试","清一下缓存",
+	"删了重装","你刷新一下","环境问题","少了个分号",
+	"拼错了","没保存","又不是不能用","绷不住了","难绷",
 ];
 /** 收尾文案池 */
-const DONE_PHRASES = ["交差！","搞定，下一个","好了，收工","done！","完成啦","交作业","结束，完美","完工咯","搞定啦","任务完成","好了，歇会儿","搞定","收工","妥了","完事","交差","done","齐活","拿下"];
+const DONE_PHRASES = ["交差！","搞定，下一个","好了，收工","完成啦","交作业","结束，完美","完工咯","搞定啦","任务完成","好了，歇会儿","搞定","收工","妥了","完事","交差","齐活","拿下","收工！","搞定收工","收！","完事！","下一题","能跑！","没报错","过了","上线！","在我机器上能跑","稳了","6"];
 /** 打断后再启动接梗 */
-const CONTINUE_PHRASES = ["再来，again！","接着盘","继续整","again！走起","接着刚才的","续上，继续","再续一秒","继续继续","继续…","好，接着来…","again","没断片"];
+const CONTINUE_PHRASES = ["再来，again！","接着盘","继续整","again！走起","接着刚才的","续上，继续","再续一秒","继续继续","继续…","好，接着来…","again","没断片","在修了在修了","马上好","还差一点","快好了"];
 /** 等待模型第一个 token */
 const WAITING_PHRASES = [
 	"呼叫模型…",
@@ -444,25 +470,62 @@ const WAITING_PHRASES = [
 	"模型：快了快了",
 	"别急别急",
 	"来了来了",
+	"等它跑完",
+	"还在排队",
+	"马上出结果",
 ];
 const WAITING_PHRASE_TICKS = 15; // ~2.6s 换一句
 /** 周末问候 */
-const WEEKEND_PHRASES = ["周末摸鱼中","周末也在！","放假也陪你","周末不关机","周末偷着盘","周末也在卷？","卷王你好","还在加班…"];
+const WEEKEND_PHRASES = ["周末摸鱼中","周末也在！","放假也陪你","周末不关机","周末偷着盘","周末也在卷？","卷王你好","还在加班…","周末限定皮肤","周六也营业","周日也接单","周末不放假","摸鱼限定版","周末模式 ON","周末hotfix","周末在修bug","周末上线"];
+
+/** 压缩感知文案（阈值触发 / 手动） */
+const COMPACT_PHRASES = [
+	"压缩了一下",
+	"瘦了个身",
+	"腾出地方了",
+	"整理了下记忆",
+	"减负成功",
+	"释放了一波",
+	"清爽多了",
+	"瘦身完毕",
+	"好多了",
+	"整理好了",
+	"清了一下缓存",
+	"重启了一下",
+	"GC了一下",
+	"释放了一波内存",
+];
+/** 溢出触发：更急迫一点 */
+const OVERFLOW_PHRASES = [
+	"装不下了",
+	"太长了",
+	"超载了",
+	"爆了",
+	"兜不住了",
+];
+/** 溢出后重试接梗 */
+const COMPACT_RETRY_PHRASES = [
+	"马上重试",
+	"继续盘",
+	"接着来",
+	"再来",
+	"续上",
+];
 
 /** 节假日文案池（按日期匹配，命中后取代思考池一次） */
 const HOLIDAY_PHRASES: Record<string, string[]> = {
-	"01-01": ["新年快乐！","元旦快乐","新的一年，新的 bug","新年第一盘","开工大吉"],
-	"02-14": ["情人节也在敲代码","代码才是真爱","今天不约会？","bug 也是 love"],
-	"04-01": ["愚人节快乐","这个 bug 是假的吧","小心假报错","今天谁骗我"],
-	"05-01": ["劳动节还在卷","劳动最光荣","打工人打工魂"],
-	"06-01": ["儿童节快乐","谁还不是个宝宝","今天代码要写得可爱"],
-	"10-31": ["万圣节快乐","不给糖就捣蛋","🎃 南瓜来了"],
-	"12-24": ["平安夜快乐","圣诞老人来了","🎄 今晚写代码有礼物"],
-	"12-25": ["圣诞快乐","Merry Christmas","🎅 圣诞也陪你","圣诞限定彩蛋"],
-	"12-31": ["跨年夜","新年倒计时","今年最后一盘","🍾 准备跨年"],
+	"01-01": ["新年快乐！","元旦快乐","新的一年，新的 bug","新年第一盘","开工大吉","新年第一行代码"],
+	"02-14": ["情人节也在敲代码","代码才是真爱","今天不约会？","bug 也是 love","键盘就是玫瑰"],
+	"04-01": ["愚人节快乐","这个 bug 是假的吧","小心假报错","今天谁骗我","❌ 骗你的，没报错"],
+	"05-01": ["劳动节还在卷","劳动最光荣","打工人打工魂","卷王放假了？"],
+	"06-01": ["儿童节快乐","谁还不是个宝宝","今天代码要写得可爱","🍭 宝宝模式"],
+	"10-31": ["万圣节快乐","不给糖就捣蛋","🎃 南瓜来了","👻 代码也会吓人"],
+	"12-24": ["平安夜快乐","圣诞老人来了","🎄 今晚写代码有礼物","平安夜也在盘"],
+	"12-25": ["圣诞快乐","Merry Christmas","🎅 圣诞也陪你","圣诞限定彩蛋","🎄 麋鹿送代码"],
+	"12-31": ["跨年夜","新年倒计时","今年最后一盘","🍾 准备跨年","明年见！"],
 };
 /** 农历春节——这里按公历近似（2025–2027），再往后加 */
-const LUNAR_NEW_YEAR_PHRASES = ["🧧 春节快乐！","过年还在写代码","红包拿来","新春快乐","拜年了","过年好","代码也拜个年"];
+const LUNAR_NEW_YEAR_PHRASES = ["🧧 春节快乐！","过年还在写代码","红包拿来","新春快乐","拜年了","过年好","代码也拜个年","🐉 龙年大吉","年夜饭写代码","年味盘起来"];
 /** 公历日 → 春节标记（逐年加） */
 const LUNAR_NEW_YEAR_DAYS: Record<string, true> = {
 	"2025-01-29": true, "2025-01-30": true, "2025-01-31": true, "2025-02-01": true, "2025-02-02": true, "2025-02-03": true, "2025-02-04": true,
@@ -471,17 +534,17 @@ const LUNAR_NEW_YEAR_DAYS: Record<string, true> = {
 };
 /** 模型切换梗 */
 const MODEL_QUIPS: Record<string, string[]> = {
-	"claude": ["Claude 来了","换 Claude 了","让 Claude 试试","Claude 出战"],
-	"gpt": ["GPT 来了","换个 GPT","GPT 出战"],
-	"grok": ["Grok 来了","Grok 出战","Grok 硬核"],
-	"gemini": ["Gemini 来了","Gemini 出战","Google 选手"],
-	"deepseek": ["DeepSeek 来了","DeepSeek 出战","国产选手"],
-	"haiku": ["Haiku 快枪手","Haiku 来了","短平快模式"],
-	"sonnet": ["Sonnet 来了","Sonnet 出战","文采担当"],
-	"opus": ["Opus 来了","Opus 出战","放大招"],
-	"flash": ["Flash 来了","闪电模式","快快快"],
-	"pro": ["Pro 来了","Pro 出战","专业模式"],
-	"mini": ["Mini 来了","Mini 轻装上阵","小模型也够用"],
+	"claude": ["Claude 来了","换 Claude 了","让 Claude 试试","Claude 出战","克劳德上线"],
+	"gpt": ["GPT 来了","换个 GPT","GPT 出战","GPT 值班","GPT 上班"],
+	"grok": ["Grok 来了","Grok 出战","Grok 硬核","Grok 上班","火星选手"],
+	"gemini": ["Gemini 来了","Gemini 出战","Google 选手","双子星","G 家选手"],
+	"deepseek": ["DeepSeek 来了","DeepSeek 出战","国产选手","深度求索","DS 上班"],
+	"haiku": ["Haiku 快枪手","Haiku 来了","短平快模式","俳句选手","Haiku 轻快"],
+	"sonnet": ["Sonnet 来了","Sonnet 出战","文采担当","十四行诗","Sonnet 文豪"],
+	"opus": ["Opus 来了","Opus 出战","放大招","巨作登场","Opus 主力"],
+	"flash": ["Flash 来了","闪电模式","快快快","快就完事了","光速模式"],
+	"pro": ["Pro 来了","Pro 出战","专业模式","满血版","Pro 拉满"],
+	"mini": ["Mini 来了","Mini 轻装上阵","小模型也够用","迷你选手","Mini 省流"],
 };
 
 /** 检测是否为节假日，返回对应文案（null = 不是） */
@@ -548,6 +611,22 @@ function fmtTime(ms: number): string {
 	const h = Math.floor(m / 60);
 	const rm = m % 60;
 	return `${h}h${rm}m`;
+}
+
+/** 格式化成本（美元），根据量级选精度 */
+function fmtCost(cost: number): string {
+	if (cost <= 0) return "$0";
+	if (cost < 0.001) return `$${cost.toFixed(5)}`;
+	if (cost < 0.01) return `$${cost.toFixed(4)}`;
+	if (cost < 1) return `$${cost.toFixed(3)}`;
+	return `$${cost.toFixed(2)}`;
+}
+
+/** 格式化 token 数为紧凑表示 */
+function fmtTokens(tokens: number): string {
+	if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
+	if (tokens >= 1000) return `${(tokens / 1000).toFixed(1)}k`;
+	return String(tokens);
 }
 
 /** 流式 delta 没有 usage，只能按中英文字符粗估 token 数。 */
@@ -867,6 +946,8 @@ type DoneItem = { label: string; isError: boolean };
 
 export const __testing = {
 	extractToolProgress,
+	fmtCost,
+	fmtTokens,
 	normalizeThresholds,
 	rainbowShimmer,
 	shimmer,
@@ -945,6 +1026,7 @@ export default function (pi: ExtensionAPI) {
 	const featureOn = (name: string): boolean => {
 		const explicit = config.features?.[name];
 		if (typeof explicit === "boolean") return explicit;
+		if (name === "cost") return true;
 		return config.mode !== "minimal";
 	};
 	let accentHex: string | null = null;
@@ -990,6 +1072,23 @@ export default function (pi: ExtensionAPI) {
 	/** 本轮子代理总数与最高连击 */
 	let subagentTotal = 0;
 	let maxStreak = 0;
+
+	/** 本轮成本与 token 统计（before_agent_start → agent_settled） */
+	let turnCost = 0;
+	let turnInputTokens = 0;
+	let turnOutputTokens = 0;
+	let turnCacheRead = 0;
+	let turnCacheWrite = 0;
+	let turnReasoningTokens = 0;
+	/** 会话累计成本与 token（session_start → session_shutdown） */
+	let sessionCost = 0;
+	let sessionInputTokens = 0;
+	let sessionOutputTokens = 0;
+	let sessionCacheRead = 0;
+	let sessionCacheWrite = 0;
+	let sessionReasoningTokens = 0;
+	/** 去重：已累加过 usage 的 assistant 消息 timestamp */
+	const seenMessageTs = new Set<number>();
 
 	const applyFrames = (ctx: ExtensionContext) => {
 		if (config.frames === "random") {
@@ -1278,6 +1377,12 @@ export default function (pi: ExtensionAPI) {
 		toolCount = 0;
 		firstTokenSeen = false;
 		outputTokens = 0;
+		turnCost = 0;
+		turnInputTokens = 0;
+		turnOutputTokens = 0;
+		turnCacheRead = 0;
+		turnCacheWrite = 0;
+		turnReasoningTokens = 0;
 		thinkingMs = 0;
 		toolMs = 0;
 		streak = 0;
@@ -1331,6 +1436,19 @@ export default function (pi: ExtensionAPI) {
 		toolCount = 0;
 		firstTokenSeen = false;
 		outputTokens = 0;
+		turnCost = 0;
+		turnInputTokens = 0;
+		turnOutputTokens = 0;
+		turnCacheRead = 0;
+		turnCacheWrite = 0;
+		turnReasoningTokens = 0;
+		sessionCost = 0;
+		sessionInputTokens = 0;
+		sessionOutputTokens = 0;
+		sessionCacheRead = 0;
+		sessionCacheWrite = 0;
+		sessionReasoningTokens = 0;
+		seenMessageTs.clear();
 		thinkingMs = 0;
 		toolMs = 0;
 		streak = 0;
@@ -1555,9 +1673,34 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("message_end", async (event, _ctx) => {
 		if (event.message?.role !== "assistant") return;
-		dbg("msg_end", { hasUsage: !!(event.message as any)?.usage });
-		const out = (event.message as any)?.usage?.output;
+		const msg = event.message;
+		const usage = (msg as any)?.usage;
+		dbg("msg_end", { hasUsage: !!usage });
+		const out = usage?.output;
 		if (typeof out === "number" && out > 0) outputTokens += out;
+
+		// 成本与 token 累加（timestamp 去重，防压缩回放重复计）
+		if (usage && typeof msg.timestamp === "number" && !seenMessageTs.has(msg.timestamp)) {
+			seenMessageTs.add(msg.timestamp);
+			const cost = typeof usage.cost?.total === "number" ? usage.cost.total : 0;
+			const input = typeof usage.input === "number" ? usage.input : 0;
+			const output = typeof usage.output === "number" ? usage.output : 0;
+			const cacheRead = typeof usage.cacheRead === "number" ? usage.cacheRead : 0;
+			const cacheWrite = typeof usage.cacheWrite === "number" ? usage.cacheWrite : 0;
+			const reasoning = typeof usage.reasoning === "number" ? usage.reasoning : 0;
+			turnCost += cost;
+			turnInputTokens += input;
+			turnOutputTokens += output;
+			turnCacheRead += cacheRead;
+			turnCacheWrite += cacheWrite;
+			turnReasoningTokens += reasoning;
+			sessionCost += cost;
+			sessionInputTokens += input;
+			sessionOutputTokens += output;
+			sessionCacheRead += cacheRead;
+			sessionCacheWrite += cacheWrite;
+			sessionReasoningTokens += reasoning;
+		}
 	});
 
 	pi.on("model_select", async (event, ctx) => {
@@ -1664,13 +1807,52 @@ export default function (pi: ExtensionAPI) {
 			3000,
 		);
 		if (secs >= 3) {
+			const costOn = featureOn("cost");
+			const turnTotalTok = turnInputTokens + turnOutputTokens + turnCacheRead + turnCacheWrite;
+			const costPart = costOn && turnCost > 0 ? ` · 💰 ${fmtCost(turnCost)}` : "";
+			const tokSummary = costOn && turnTotalTok > 0
+				? ` · 🔥 ${fmtTokens(turnTotalTok)} tok`
+				: "";
 			ctx.ui.notify(
 				`⏱ 总用时 ${fmtTime(Date.now() - agentStartMs)}` +
 					(toolCount > 0 ? ` · ${toolCount} 工具` : "") +
-					` · 想${thinkSec}s 干${toolSec}s`,
+					` · 想${thinkSec}s 干${toolSec}s${costPart}${tokSummary}`,
 				"info",
 			);
 		}
+	});
+
+	pi.on("session_compact", async (event, ctx) => {
+		dbg("compact", { reason: event.reason, willRetry: event.willRetry });
+		// 压缩后上下文预警应消失
+		contextWarnPct = null;
+
+		const tokensBefore = event.compactionEntry?.tokensBefore;
+		const usage = event.compactionEntry?.usage;
+		const after = ctx.getContextUsage();
+		const tokensAfter = after?.tokens;
+
+		const parts: string[] = [];
+		if (event.reason === "overflow") {
+			parts.push(pick(OVERFLOW_PHRASES));
+		} else {
+			parts.push(pick(COMPACT_PHRASES));
+		}
+
+		if (typeof tokensBefore === "number" && typeof tokensAfter === "number" && tokensBefore > 0) {
+			const saved = Math.round((1 - tokensAfter / tokensBefore) * 100);
+			parts.push(`${fmtTokens(tokensBefore)}→${fmtTokens(tokensAfter)} tok`);
+			if (saved > 0) parts.push(`省了 ${saved}%`);
+		}
+		if (event.willRetry) parts.push(pick(COMPACT_RETRY_PHRASES));
+
+		// 压缩调用本身有成本则累计
+		if (usage?.cost?.total) {
+			turnCost += usage.cost.total;
+			sessionCost += usage.cost.total;
+		}
+
+		flashStatus(ctx, ctx.ui.theme.fg("accent", parts.join(" · ")), 3000);
 	});
 
 	pi.on("session_shutdown", async (_event, ctx) => {
@@ -2129,15 +2311,29 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			// /activity stats — 本轮统计
+			// /activity stats — 本轮 + 会话统计
 			if (parts[0] === "stats") {
 				const thinkSec = Math.round(thinkingMs / 1000);
 				const toolSec = Math.round(toolMs / 1000);
 				const sessionHrs = sessionStartMs > 0 ? ((Date.now() - sessionStartMs) / 3_600_000).toFixed(1) : "0";
-				ctx.ui.notify(
-					`📊 本轮：${toolCount} 工具 · 想 ${thinkSec}s 干 ${toolSec}s · ${outputTokens} tok${currentTps > 0 ? ` · ~${currentTps} tok/s` : ""} · 连击峰值 ${maxStreak} · 子代理 ${subagentTotal} · 会话 ${sessionHrs}h`,
-					"info",
-				);
+				const lines: string[] = [];
+				lines.push(`📊 本轮：${toolCount} 工具 · 想 ${thinkSec}s 干 ${toolSec}s${currentTps > 0 ? ` · ~${currentTps} tok/s` : ""} · 连击峰值 ${maxStreak} · 子代理 ${subagentTotal}`);
+				if (featureOn("cost")) {
+					const turnTotalTok = turnInputTokens + turnOutputTokens + turnCacheRead + turnCacheWrite;
+					const sessionTotalTok = sessionInputTokens + sessionOutputTokens + sessionCacheRead + sessionCacheWrite;
+					if (turnTotalTok > 0 || turnCost > 0) {
+						const cacheHit = turnInputTokens + turnCacheRead > 0
+							? Math.round((turnCacheRead / (turnInputTokens + turnCacheRead)) * 100)
+							: 0;
+						lines.push(`💰 本轮 ${fmtCost(turnCost)} · 🔥 ${fmtTokens(turnTotalTok)} tok` +
+							(turnCacheRead > 0 ? ` · 缓存命中 ${cacheHit}%` : "") +
+							(turnReasoningTokens > 0 ? ` · 🧠 思考 ${fmtTokens(turnReasoningTokens)}` : ""));
+					}
+					if (sessionCost > 0 || sessionTotalTok > 0) {
+						lines.push(`📈 会话累计 ${fmtCost(sessionCost)} · ${fmtTokens(sessionTotalTok)} tok · 已活跃 ${sessionHrs}h`);
+					}
+				}
+				ctx.ui.notify(lines.join("\n"), "info");
 				return;
 			}
 

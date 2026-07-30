@@ -33,7 +33,7 @@ function createContext() {
 					done(undefined);
 				}),
 			},
-			getContextUsage: () => undefined,
+			getContextUsage: () => ({ tokens: 12000, percent: 15 }),
 		},
 		statuses,
 		messages,
@@ -133,4 +133,97 @@ test("completion waits for agent_settled and preserves retry tool totals", async
 	await harness.emit("session_shutdown", {}, ctx);
 	assert.equal(state.indicators.at(-1), undefined);
 	assert.equal(state.messages.at(-1), undefined);
+});
+
+test("fmtCost formats cost at appropriate precision", () => {
+	assert.equal(__testing.fmtCost(0), "$0");
+	assert.equal(__testing.fmtCost(0.00001), "$0.00001");
+	assert.equal(__testing.fmtCost(0.005), "$0.0050");
+	assert.equal(__testing.fmtCost(0.042), "$0.042");
+	assert.equal(__testing.fmtCost(0.087), "$0.087");
+	assert.equal(__testing.fmtCost(1.5), "$1.50");
+	assert.equal(__testing.fmtCost(42), "$42.00");
+});
+
+test("fmtTokens formats token counts compactly", () => {
+	assert.equal(__testing.fmtTokens(0), "0");
+	assert.equal(__testing.fmtTokens(42), "42");
+	assert.equal(__testing.fmtTokens(1000), "1.0k");
+	assert.equal(__testing.fmtTokens(12300), "12.3k");
+	assert.equal(__testing.fmtTokens(2000000), "2.0M");
+});
+
+test("cost accumulates with dedup and shows in settled notify", async () => {
+	const harness = createPiHarness();
+	const state = createContext();
+	const ctx = state.ctx as any;
+
+	await harness.emit("before_agent_start", { systemPrompt: "", systemPromptOptions: {}, prompt: "cost test" }, ctx);
+	await harness.emit("agent_start", {}, ctx);
+
+	// 两条不同 timestamp 的 assistant message_end，都有 usage
+	await harness.emit("message_end", {
+		message: {
+			role: "assistant",
+			timestamp: 1000,
+			usage: { input: 5000, output: 2000, cacheRead: 3000, cacheWrite: 1000, reasoning: 500, totalTokens: 11000, cost: { input: 0.015, output: 0.01, cacheRead: 0.001, cacheWrite: 0.005, total: 0.031 } },
+		},
+	}, ctx);
+	// 同一 timestamp 重发 → 应被去重
+	await harness.emit("message_end", {
+		message: {
+			role: "assistant",
+			timestamp: 1000,
+			usage: { input: 5000, output: 2000, cacheRead: 3000, cacheWrite: 1000, reasoning: 500, totalTokens: 11000, cost: { input: 0.015, output: 0.01, cacheRead: 0.001, cacheWrite: 0.005, total: 0.031 } },
+		},
+	}, ctx);
+	// 第二条新 timestamp
+	await harness.emit("message_end", {
+		message: {
+			role: "assistant",
+			timestamp: 2000,
+			usage: { input: 8000, output: 1000, cacheRead: 5000, cacheWrite: 0, totalTokens: 14000, cost: { total: 0.029 } },
+		},
+	}, ctx);
+
+	await harness.emit("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] }, ctx);
+	await harness.emit("agent_settled", {}, ctx);
+
+	// notify 有 secs>=3 门槛；用 /activity stats 验证累加结果（去重后 0.031 + 0.029 = 0.06）
+	await harness.command("activity", "stats", ctx);
+	const statsNotify = state.notifications.find((n) => n.includes("💰"));
+	assert.ok(statsNotify, "stats should include cost info");
+	assert.match(statsNotify, /\$0\.06/);
+	assert.match(statsNotify, /25\.0k/);
+});
+
+test("session_compact flashes compaction notice with token savings", async () => {
+	const harness = createPiHarness();
+	const state = createContext();
+	const ctx = state.ctx as any;
+
+	await harness.emit("before_agent_start", { systemPrompt: "", systemPromptOptions: {}, prompt: "test" }, ctx);
+	await harness.emit("agent_start", {}, ctx);
+
+	await harness.emit("session_compact", {
+		type: "session_compact",
+		compactionEntry: {
+			tokensBefore: 45000,
+			summary: "summary",
+			usage: { cost: { total: 0.015 } },
+		},
+		reason: "threshold",
+		willRetry: false,
+		fromExtension: false,
+	}, ctx);
+
+	await new Promise((resolve) => setTimeout(resolve, 120));
+	// flashStatus 用 DONE_STATUS_KEY；闪现内容应包含压缩信息
+	const flash = state.statuses.find((s) => s.key === "working-activity-done" && s.value);
+	assert.ok(flash, "should flash a compaction status");
+	const text = stripAnsi(flash!.value!);
+	assert.match(text, /45\.0k/);
+	assert.match(text, /12\.0k/);
+	// contextWarnPct 应被重置
+	assert.equal(state.notifications.some((n) => n.includes("上下文")), false);
 });
