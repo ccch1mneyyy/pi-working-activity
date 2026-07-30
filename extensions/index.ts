@@ -1,7 +1,7 @@
 /**
  * working-activity — Working 行：实时显示模型在做什么（中文 + 活泼动画）
  *
- * 数据：tool_execution_start/end 事件（无二次模型调用）
+ * 数据：tool_execution_start/update/end 事件（无二次模型调用）
  *
  * 动画：
  *   - 指示器多套预设（/activity frames <名> 切换）：
@@ -14,8 +14,9 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, getSettingsListTheme } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Container, type SettingItem, SettingsList, Text } from "@earendil-works/pi-tui";
 
 // ─── 指示器预设 ───────────────────────────────────────────────────
 
@@ -115,6 +116,20 @@ const FEATURE_FLAGS = [
 	"continuePhrases",  // 打断后接梗
 ] as const;
 
+/** 设置面板里的中文标签 */
+const FEATURE_LABELS: Record<(typeof FEATURE_FLAGS)[number], string> = {
+	phrases: "俏皮文案",
+	rareEggs: "稀有彩蛋",
+	nightPhrases: "深夜文案",
+	weekend: "周末问候",
+	holidays: "节假日彩蛋",
+	combo: "工具连击",
+	failPhrases: "失败文案",
+	modelQuips: "模型切换梗",
+	shimmer: "星辉效果",
+	continuePhrases: "打断接梗",
+};
+
 /** minimal 模式的朴素文案 */
 const MINIMAL_THINKING = "思考中";
 const MINIMAL_WAITING = "等待模型响应";
@@ -123,9 +138,32 @@ function configPath(): string {
 	return path.join(getAgentDir(), "working-activity.json");
 }
 
-function readConfig(): { cfg: Config; raw: Record<string, unknown> } {
+type ConfigReadResult = {
+	cfg: Config;
+	raw: Record<string, unknown>;
+	error?: string;
+};
+
+function errorText(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+function normalizeThresholds(cfg: Config): Config {
+	const warnAt = cfg.contextWarnAt ?? 80;
+	const dangerAt = cfg.contextDangerAt ?? 95;
+	return dangerAt < warnAt ? { ...cfg, contextDangerAt: warnAt } : cfg;
+}
+
+function readConfig(): ConfigReadResult {
+	if (!fs.existsSync(configPath())) {
+		return { cfg: { frames: DEFAULT_PRESET }, raw: {} };
+	}
 	try {
-		const raw = JSON.parse(fs.readFileSync(configPath(), "utf8")) as Record<string, unknown>;
+		const parsed = JSON.parse(fs.readFileSync(configPath(), "utf8")) as unknown;
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+			throw new Error("配置根节点必须是 JSON 对象");
+		}
+		const raw = parsed as Record<string, unknown>;
 		const cfg: Config = { frames: DEFAULT_PRESET };
 		if (typeof raw.frames === "string" && (FRAME_PRESETS[raw.frames] || raw.frames === "random")) {
 			cfg.frames = raw.frames;
@@ -163,16 +201,20 @@ function readConfig(): { cfg: Config; raw: Record<string, unknown> } {
 			}
 			if (Object.keys(f).length > 0) cfg.features = f;
 		}
-		return { cfg, raw };
-	} catch {}
-	return { cfg: { frames: DEFAULT_PRESET }, raw: {} };
+		return { cfg: normalizeThresholds(cfg), raw };
+	} catch (error) {
+		return {
+			cfg: { frames: DEFAULT_PRESET },
+			raw: {},
+			error: errorText(error),
+		};
+	}
 }
 
 function writeConfig(cfg: Config, raw: Record<string, unknown>): void {
-	try {
-		// 合并不认识的键（如用户手写的 position 等），防止被静默删除
-		fs.writeFileSync(configPath(), JSON.stringify({ ...raw, ...cfg }, null, 2) + "\n", "utf8");
-	} catch {}
+	fs.mkdirSync(path.dirname(configPath()), { recursive: true });
+	// 合并不认识的键（如用户手写的 position 等），防止被静默删除。
+	fs.writeFileSync(configPath(), JSON.stringify({ ...raw, ...cfg }, null, 2) + "\n", "utf8");
 }
 
 // ─── 文案映射（俏皮 + 保留真实参数）───────────────────────────────
@@ -482,6 +524,15 @@ const THINKING_PHRASE_TICKS = 15;
 /** 彩蛋停留更久：约 7.5s 才换 */
 const RARE_PHRASE_TICKS = 45;
 
+const graphemeSegmenter = typeof Intl.Segmenter === "function"
+	? new Intl.Segmenter(undefined, { granularity: "grapheme" })
+	: null;
+
+function splitGraphemes(text: string): string[] {
+	if (!graphemeSegmenter) return Array.from(text);
+	return Array.from(graphemeSegmenter.segment(text), (part) => part.segment);
+}
+
 function pick<T>(arr: T[]): T {
 	return arr[Math.floor(Math.random() * arr.length)]!;
 }
@@ -531,8 +582,70 @@ function actionFor(toolName: string): string {
 
 function short(s: string, n = 48): string {
 	const t = s.replace(/\s+/g, " ").trim();
-	if (t.length <= n) return t;
-	return `${t.slice(0, n - 1)}…`;
+	const chars = splitGraphemes(t);
+	if (chars.length <= n) return t;
+	return `${chars.slice(0, n - 1).join("")}…`;
+}
+
+const ANSI_PATTERN = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+const STAGE_PATTERN = /^(?:step|stage|phase|downloading|uploading|building|testing|installing|fetching|compiling|rendering|deploying|processing|extracting|loading|waiting|步骤|阶段|下载|上传|构建|测试|安装|拉取|编译|渲染|部署|处理|解压|加载|等待)(?:\b|[：:\s]|$)/i;
+
+function asPercent(value: unknown): string | null {
+	if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return null;
+	const percent = value <= 1 ? value * 100 : value;
+	if (percent > 100) return null;
+	return `${Math.round(percent)}%`;
+}
+
+function extractToolProgress(partialResult: unknown): string | null {
+	if (!partialResult || typeof partialResult !== "object") return null;
+	const result = partialResult as Record<string, unknown>;
+	const details = result.details && typeof result.details === "object"
+		? result.details as Record<string, unknown>
+		: {};
+
+	for (const source of [details, result]) {
+		for (const key of ["percent", "percentage", "progressPercent"]) {
+			const percent = asPercent(source[key]);
+			if (percent) return percent;
+		}
+		const progress = source.progress;
+		const directProgress = asPercent(progress);
+		if (directProgress) return directProgress;
+		if (progress && typeof progress === "object") {
+			const p = progress as Record<string, unknown>;
+			const direct = asPercent(p.percent ?? p.percentage);
+			if (direct) return direct;
+			const current = typeof p.current === "number" ? p.current : p.completed;
+			const total = p.total;
+			if (typeof current === "number" && typeof total === "number" && total > 0) {
+				return `${Math.round((current / total) * 100)}%`;
+			}
+		}
+		for (const key of ["stage", "phase", "status", "message"]) {
+			const value = source[key];
+			if (typeof value === "string" && value.trim()) return short(value.replace(ANSI_PATTERN, ""), 36);
+		}
+	}
+
+	const content = Array.isArray(result.content) ? result.content : [];
+	const text = content
+		.filter((part): part is { type: string; text: string } =>
+			!!part && typeof part === "object" && (part as Record<string, unknown>).type === "text" && typeof (part as Record<string, unknown>).text === "string")
+		.map((part) => part.text)
+		.join("\n")
+		.replace(ANSI_PATTERN, "");
+	if (!text.trim()) return null;
+	const lines = text.split(/\r\n|\r|\n/).map((line) => line.trim()).filter(Boolean);
+	for (let i = lines.length - 1; i >= 0; i--) {
+		const matches = [...lines[i]!.matchAll(/(\d{1,3}(?:\.\d+)?)\s*%/g)];
+		for (let j = matches.length - 1; j >= 0; j--) {
+			const value = Number(matches[j]![1]);
+			if (value >= 0 && value <= 100) return `${Math.round(value)}%`;
+		}
+	}
+	const last = lines.at(-1);
+	return last && STAGE_PATTERN.test(last) ? short(last, 36) : null;
 }
 
 function basename(p: string): string {
@@ -663,21 +776,23 @@ function shimmer(text: string, frame: number, baseHex: string | null, ctx: Exten
 	if (!baseHex) return ctx.ui.theme.fg("accent", text);
 	const base = hexToRgb(baseHex);
 	const hi = lightenRgb(base[0], base[1], base[2], 0.45);
-	const total = text.length + SHIMMER_BAND * 2;
+	const chars = splitGraphemes(text);
+	const total = chars.length + SHIMMER_BAND * 2;
 	const pos = frame % total;
 	let out = "";
-	for (let i = 0; i < text.length; i++) {
+	for (let i = 0; i < chars.length; i++) {
 		const dist = Math.abs(i - pos);
 		const t = Math.max(0, 1 - dist / SHIMMER_BAND);
 		const c = blend(base, hi, t);
-		out += `\x1b[38;2;${c[0]};${c[1]};${c[2]}m${text[i]}\x1b[0m`;
+		out += `\x1b[38;2;${c[0]};${c[1]};${c[2]}m${chars[i]}\x1b[0m`;
 	}
 	return out;
 }
 
 /** 炫彩流光 v2：平滑色相梯度 + 亮度波浪呼吸 + 扫过高光带（带下划线） + 动态金边花饰 */
 function rainbowShimmer(text: string, frame: number): string {
-	const len = text.length;
+	const chars = splitGraphemes(text);
+	const len = chars.length;
 	// 两侧花饰：轮转 + 暖金呼吸
 	const SPARKLES = [`✦${TE}`, `✧${TE}`, `✶${TE}`, `✷${TE}`, `✦${TE}`, `✧${TE}`];
 	const sparkle = SPARKLES[Math.floor(frame / 2) % SPARKLES.length]!;
@@ -699,7 +814,7 @@ function rainbowShimmer(text: string, frame: number): string {
 		const [r, g, b] = hslToRgb(hue, 0.92, l);
 		// 高光带中心的字符加下划线，让“光扫过去”有实体感
 		const underline = glow > 0.55 ? "\x1b[4m" : "";
-		out += `${underline}\x1b[1;38;2;${r};${g};${b}m${text[i]}\x1b[0m`;
+		out += `${underline}\x1b[1;38;2;${r};${g};${b}m${chars[i]}\x1b[0m`;
 	}
 	return `${out} ${gold}`;
 }
@@ -743,11 +858,20 @@ type ActiveTool = {
 	id: string;
 	name: string;
 	label: string;
+	progress: string | null;
 	startedAt: number;
 	isSubagent: boolean;
 };
 /** 完成队列项：带成功/失败标记 */
 type DoneItem = { label: string; isError: boolean };
+
+export const __testing = {
+	extractToolProgress,
+	normalizeThresholds,
+	rainbowShimmer,
+	shimmer,
+	splitGraphemes,
+};
 
 export default function (pi: ExtensionAPI) {
 	const active = new Map<string, ActiveTool>();
@@ -795,14 +919,28 @@ export default function (pi: ExtensionAPI) {
 	let tick = 0;
 	let rotateIdx = 0;
 	let rawConfig: Record<string, unknown> = {};
+	let configReadError: string | null = null;
 	let config: Config;
 	{
 		const initial = readConfig();
 		config = initial.cfg;
 		rawConfig = initial.raw;
+		configReadError = initial.error ?? null;
 	}
-	/** 写配置：合并未知键，防止用户手写字段被删 */
-	const saveConfig = () => writeConfig(config, rawConfig);
+	/** 写配置：仅在落盘成功后更新内存状态。 */
+	const persistConfig = (next: Config, ctx: ExtensionContext): boolean => {
+		const normalized = normalizeThresholds(next);
+		try {
+			writeConfig(normalized, rawConfig);
+			config = normalized;
+			rawConfig = { ...rawConfig, ...normalized };
+			configReadError = null;
+			return true;
+		} catch (error) {
+			ctx.ui.notify(`配置保存失败：${errorText(error)}`, "error");
+			return false;
+		}
+	};
 	/** 特性开关：显式 features 优先，否则 minimal 全关、lively 全开 */
 	const featureOn = (name: string): boolean => {
 		const explicit = config.features?.[name];
@@ -847,6 +985,8 @@ export default function (pi: ExtensionAPI) {
 	/** 会话内累计活跃时长与已发提醒次数 */
 	let sessionActiveMs = 0;
 	let workRemindCount = 0;
+	/** 最近一次底层 agent run 的结束原因，等 agent_settled 后再展示。 */
+	let pendingStopReason: string | undefined;
 	/** 本轮子代理总数与最高连击 */
 	let subagentTotal = 0;
 	let maxStreak = 0;
@@ -870,6 +1010,11 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 		const theme = ctx.ui.theme;
+		const liveAccentHex = accentHexOf(ctx);
+		if (liveAccentHex !== accentHex) {
+			accentHex = liveAccentHex;
+			applyFrames(ctx);
+		}
 		// 接梗文案展示期：不覆盖
 		if (continueUntil > 0 && Date.now() < continueUntil) return;
 		if (continueUntil > 0) continueUntil = 0;
@@ -923,7 +1068,7 @@ export default function (pi: ExtensionAPI) {
 				const label = showingDone.item.isError
 					? theme.fg("error", showingDone.item.label)
 					: fx(showingDone.item.label);
-				ctx.ui.setWorkingMessage(label + mark);
+				ctx.ui.setWorkingMessage(ctxWarn + label + mark);
 				return;
 			}
 			// 队列空了：最后一个粘留 3s
@@ -934,7 +1079,7 @@ export default function (pi: ExtensionAPI) {
 				const label = lastSticky.item.isError
 					? theme.fg("error", lastSticky.item.label)
 					: fx(lastSticky.item.label);
-				ctx.ui.setWorkingMessage(label + mark);
+				ctx.ui.setWorkingMessage(ctxWarn + label + mark);
 				return;
 			}
 			// 还没收到第一个 token：轮换等待文案（~2.6s 换一句）
@@ -1024,6 +1169,7 @@ export default function (pi: ExtensionAPI) {
 				? theme.fg("dim", ` ${Math.floor(elapsed / 1000)}s`)
 				: "";
 		const more = list.length > 1 ? theme.fg("dim", ` · 另 ${list.length - 1} 项`) : "";
+		const progress = cur.progress ? theme.fg("dim", ` · ${cur.progress}`) : "";
 		// 子代理并行提示：只统计当前仍在执行的子代理。
 		const activeSubagentCount = list.filter((tool) => tool.isSubagent).length;
 		const subHint =
@@ -1048,10 +1194,12 @@ export default function (pi: ExtensionAPI) {
 		}
 		if (narrFresh) {
 				ctx.ui.setWorkingMessage(
-					combo +
+					ctxWarn +
+						combo +
 						slow +
 						fx(narratedStatus!) +
 						theme.fg("dim", ` · ${cur.label}`) +
+						progress +
 						secs +
 						more +
 						subHint,
@@ -1060,7 +1208,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			ctx.ui.setWorkingMessage(
-				ctxWarn + combo + slow + fx(cur.label) + secs + more + subHint,
+				ctxWarn + combo + slow + fx(cur.label) + progress + secs + more + subHint,
 			);
 	};
 
@@ -1119,6 +1267,49 @@ export default function (pi: ExtensionAPI) {
 		}
 	};
 
+	const resetRequestState = (ctx: ExtensionContext) => {
+		active.clear();
+		doneQueue.length = 0;
+		showingDone = null;
+		lastSticky = null;
+		busy = false;
+		tick = 0;
+		rotateIdx = 0;
+		toolCount = 0;
+		firstTokenSeen = false;
+		outputTokens = 0;
+		thinkingMs = 0;
+		toolMs = 0;
+		streak = 0;
+		maxStreak = 0;
+		subagentTotal = 0;
+		lastToolEndMs = 0;
+		narratedStatus = null;
+		narratedAtMs = 0;
+		lastActivityMs = 0;
+		recentText = "";
+		resolvedPreset = null;
+		agentStartMs = Date.now();
+		tokBucket = 0;
+		tokBucketStartMs = 0;
+		lastTextDeltaMs = 0;
+		currentTps = 0;
+		holidayShown = false;
+		thinkingPhrase = null;
+		thinkingPhraseTick = THINKING_PHRASE_TICKS;
+		isRarePhrase = false;
+		waitingPhrase = null;
+		waitingPhraseTick = 0;
+		continueUntil = 0;
+		pendingStopReason = undefined;
+		if (doneTimer) {
+			clearTimeout(doneTimer);
+			doneTimer = null;
+		}
+		ctx.ui.setStatus(DONE_STATUS_KEY, undefined);
+		accentHex = accentHexOf(ctx);
+	};
+
 	pi.on("session_start", async (_e, ctx) => {
 		ctx.ui.setStatus(DONE_STATUS_KEY, undefined);
 		ctx.ui.setStatus(MODEL_STATUS_KEY, undefined);
@@ -1169,6 +1360,7 @@ export default function (pi: ExtensionAPI) {
 		workRemindCount = 0;
 		subagentTotal = 0;
 		maxStreak = 0;
+		pendingStopReason = undefined;
 		if (doneTimer) {
 			clearTimeout(doneTimer);
 			doneTimer = null;
@@ -1182,8 +1374,17 @@ export default function (pi: ExtensionAPI) {
 			const loaded = readConfig();
 			config = loaded.cfg;
 			rawConfig = loaded.raw;
+			configReadError = loaded.error ?? null;
 		}
-		if (!fs.existsSync(configPath())) saveConfig();
+		if (!fs.existsSync(configPath())) {
+			try {
+				writeConfig(config, rawConfig);
+			} catch (error) {
+				ctx.ui.notify(`配置初始化失败：${errorText(error)}`, "error");
+			}
+		} else if (configReadError) {
+			ctx.ui.notify(`活动配置读取失败，已临时使用默认值：${configReadError}`, "warning");
+		}
 		accentHex = accentHexOf(ctx);
 		applyFrames(ctx);
 		ctx.ui.setWorkingMessage(undefined);
@@ -1197,33 +1398,17 @@ export default function (pi: ExtensionAPI) {
 		showingDone = null;
 		lastSticky = null;
 		busy = true;
-		tick = 0;
-		toolCount = 0;
 		firstTokenSeen = false;
-		outputTokens = 0;
-		thinkingMs = 0;
-		toolMs = 0;
-		streak = 0;
-		maxStreak = 0;
-		subagentTotal = 0;
-		lastToolEndMs = 0;
 		narratedStatus = null;
 		narratedAtMs = 0;
 		lastActivityMs = 0;
 		recentText = "";
-		resolvedPreset = null; // 新一轮 random 重新随
-		agentStartMs = Date.now();
 		tokBucket = 0;
 		tokBucketStartMs = 0;
 		lastTextDeltaMs = 0;
 		currentTps = 0;
-		holidayShown = false;
 		ctx.ui.setStatus(DONE_STATUS_KEY, undefined);
-		if (doneTimer) {
-			clearTimeout(doneTimer);
-			doneTimer = null;
-		}
-		thinkingPhraseTick = THINKING_PHRASE_TICKS; // 立刻抽一条
+		thinkingPhraseTick = THINKING_PHRASE_TICKS;
 		thinkingPhrase = null;
 		isRarePhrase = false;
 		waitingPhrase = null;
@@ -1265,12 +1450,25 @@ export default function (pi: ExtensionAPI) {
 			label: featureOn("phrases")
 				? summarize(name, event.args, config.customActions)
 				: plainLabel(name, event.args),
+			progress: null,
 			startedAt: Date.now(),
 			isSubagent,
 		});
 		applyFrames(ctx);
 		render(ctx);
 		startTick(ctx);
+	});
+
+	pi.on("tool_execution_update", async (event, ctx) => {
+		const id = String(event.toolCallId ?? "");
+		const tool = id ? active.get(id) : undefined;
+		if (!tool) return;
+		const progress = extractToolProgress(event.partialResult);
+		if (!progress || progress === tool.progress) return;
+		tool.progress = progress;
+		lastActivityMs = Date.now();
+		dbg("tool_progress", { name: tool.name, progress });
+		render(ctx);
 	});
 
 	pi.on("tool_execution_end", async (event, ctx) => {
@@ -1380,7 +1578,8 @@ export default function (pi: ExtensionAPI) {
 		}, 2500);
 	});
 
-	pi.on("before_agent_start", async (event, _ctx) => {
+	pi.on("before_agent_start", async (event, ctx) => {
+		resetRequestState(ctx);
 		if (!config.narrate) return;
 		// developer role 不是 Pi 的会话消息类型；追加到系统提示才会实际送入模型。
 		return { systemPrompt: `${event.systemPrompt}\n\n${NARRATE_INSTRUCTION}` };
@@ -1398,19 +1597,43 @@ export default function (pi: ExtensionAPI) {
 		lastTextDeltaMs = 0;
 	});
 
-	pi.on("agent_end", async (event, ctx) => {
+	const flashStatus = (ctx: ExtensionContext, text: string, ms: number) => {
+		if (doneTimer) clearTimeout(doneTimer);
+		doneTimer = setTimeout(() => {
+			dbg("flash_show", { ms });
+			ctx.ui.setStatus(DONE_STATUS_KEY, text);
+			doneTimer = setTimeout(() => {
+				doneTimer = null;
+				dbg("flash_clear");
+				ctx.ui.setStatus(DONE_STATUS_KEY, undefined);
+			}, ms);
+		}, 60);
+	};
+
+	pi.on("agent_end", async (event, _ctx) => {
 		busy = false;
 		active.clear();
 		doneQueue.length = 0;
 		showingDone = null;
 		lastSticky = null;
 		stopTick();
-		// 被打断 / 出错 / 正常完成 三种收尾
 		const lastAssistant = [...(event.messages ?? [])]
 			.reverse()
-			.find((m: any) => m.role === "assistant");
-		const stopReason = lastAssistant?.stopReason;
-		dbg("agent_end", { stopReason, toolCount });
+			.find((message) => message.role === "assistant");
+		pendingStopReason = lastAssistant?.role === "assistant" ? lastAssistant.stopReason : undefined;
+		dbg("agent_end", { stopReason: pendingStopReason, toolCount });
+	});
+
+	pi.on("agent_settled", async (_event, ctx) => {
+		busy = false;
+		active.clear();
+		doneQueue.length = 0;
+		showingDone = null;
+		lastSticky = null;
+		stopTick();
+
+		const stopReason = pendingStopReason;
+		pendingStopReason = undefined;
 		const secs = agentStartMs > 0 ? Math.round((Date.now() - agentStartMs) / 1000) : 0;
 		const thinkSec = Math.round(thinkingMs / 1000);
 		const toolSec = Math.round(toolMs / 1000);
@@ -1419,39 +1642,27 @@ export default function (pi: ExtensionAPI) {
 		const timePart = secs >= 3 ? ` · 想 ${thinkSec}s 干 ${toolSec}s` : "";
 		const comboPart = featureOn("combo") && toolCount >= 10 ? " · 十连击" : "";
 
-		// 收尾闪现走 setStatus（底部扩展状态区）：agent_end 后 Working 指示器已被 pi 拆除，
-		// setWorkingMessage 无处显示；setStatus 由我们自己控制生命周期
-		const flash = (text: string, ms: number) => {
-			if (doneTimer) clearTimeout(doneTimer);
-			doneTimer = setTimeout(() => {
-				dbg("flash_show", { ms });
-				ctx.ui.setStatus(DONE_STATUS_KEY, text);
-				doneTimer = setTimeout(() => {
-					doneTimer = null;
-					dbg("flash_clear");
-					ctx.ui.setStatus(DONE_STATUS_KEY, undefined);
-				}, ms);
-			}, 60);
-		};
-
 		if (stopReason === "aborted") {
 			wasAborted = true;
-			// Esc 打断：温和承认，不显示“搞定”
-			flash(ctx.ui.theme.fg("dim", "好，停了"), 1200);
+			flashStatus(ctx, ctx.ui.theme.fg("dim", "好，停了"), 1200);
 			return;
 		}
 		if (stopReason === "error") {
-			flash(ctx.ui.theme.fg("error", "哎呀，出错了"), 2000);
+			flashStatus(ctx, ctx.ui.theme.fg("error", "哎呀，出错了"), 2000);
 			return;
 		}
-		// 正常完成：随机收尾文案 + 本轮摘要
+		if (stopReason === "length") {
+			flashStatus(ctx, ctx.ui.theme.fg("warning", "到输出上限了"), 2000);
+			return;
+		}
+
 		const donePhrase = featureOn("phrases") ? pick(DONE_PHRASES) : "完成";
-		flash(
+		flashStatus(
+			ctx,
 			ctx.ui.theme.fg("success", `${donePhrase} ✓`) +
 				ctx.ui.theme.fg("dim", `${toolPart}${timePart}${tokPart}${comboPart}`),
 			3000,
 		);
-		// 弹一个总时间通知（太短的一轮不值得弹）
 		if (secs >= 3) {
 			ctx.ui.notify(
 				`⏱ 总用时 ${fmtTime(Date.now() - agentStartMs)}` +
@@ -1471,24 +1682,278 @@ export default function (pi: ExtensionAPI) {
 		stopTick();
 		waitingPhrase = null;
 		waitingPhraseTick = 0;
-		if (doneTimer) clearTimeout(doneTimer);
-		if (modelTimer) clearTimeout(modelTimer);
+		if (doneTimer) {
+			clearTimeout(doneTimer);
+			doneTimer = null;
+		}
+		if (modelTimer) {
+			clearTimeout(modelTimer);
+			modelTimer = null;
+		}
+		ctx.ui.setWorkingMessage(undefined);
+		ctx.ui.setWorkingIndicator();
+		ctx.ui.setStatus(DONE_STATUS_KEY, undefined);
 		ctx.ui.setStatus(MODEL_STATUS_KEY, undefined);
 	});
+
+	const settingValue = (id: string): string => {
+		switch (id) {
+			case "mode": return config.mode ?? "lively";
+			case "frames": return config.frames;
+			case "narrate": return config.narrate ? "on" : "off";
+			case "tps": return config.showTokPerSec ? "on" : "off";
+			case "warn": return (config.contextWarnAt ?? 80) === 0 ? "off" : `${config.contextWarnAt ?? 80}%`;
+			case "danger": return `${config.contextDangerAt ?? 95}%`;
+			case "remind": return (config.workRemindAt ?? 3) === 0 ? "off" : `${config.workRemindAt ?? 3}h`;
+			default: {
+				if (!id.startsWith("feature:")) return "";
+				const name = id.slice("feature:".length);
+				const explicit = config.features?.[name];
+				return typeof explicit === "boolean" ? (explicit ? "on" : "off") : "auto";
+			}
+		}
+	};
+
+	const configWithSetting = (id: string, value: string): Config => {
+		switch (id) {
+			case "mode": return { ...config, mode: value as "lively" | "minimal" };
+			case "frames": return { ...config, frames: value };
+			case "narrate": return { ...config, narrate: value === "on" };
+			case "tps": return { ...config, showTokPerSec: value === "on" };
+			case "warn": return { ...config, contextWarnAt: value === "off" ? 0 : Number(value.replace("%", "")) };
+			case "danger": return { ...config, contextDangerAt: Number(value.replace("%", "")) };
+			case "remind": return { ...config, workRemindAt: value === "off" ? 0 : Number(value.replace("h", "")) };
+			default: {
+				if (!id.startsWith("feature:")) return config;
+				const name = id.slice("feature:".length);
+				const features = { ...config.features };
+				if (value === "auto") delete features[name];
+				else features[name] = value === "on";
+				return { ...config, features };
+			}
+		}
+	};
+
+	const openSettings = async (ctx: ExtensionContext) => {
+		if (ctx.mode !== "tui") {
+			ctx.ui.notify("/activity settings 需要 TUI 模式", "error");
+			return;
+		}
+
+		const items: SettingItem[] = [
+			{ id: "mode", label: "模式", description: "lively 显示全部效果；minimal 只保留工具、计时和预警。", currentValue: settingValue("mode"), values: ["lively", "minimal"] },
+			{ id: "frames", label: "动画预设", description: "按 Enter/Space 切换，顶部会立即播放当前预设。", currentValue: settingValue("frames"), values: ["random", ...Object.keys(FRAME_PRESETS)] },
+			{ id: "narrate", label: "模型自述", description: "让模型在每个步骤输出一行不超过 20 字的状态。", currentValue: settingValue("narrate"), values: ["on", "off"] },
+			{ id: "tps", label: "流式速率", description: "显示基于文本增量估算的 ~tok/s。", currentValue: settingValue("tps"), values: ["on", "off"] },
+			{ id: "warn", label: "上下文预警", description: "达到阈值后显示黄色提示；off 关闭。", currentValue: settingValue("warn"), values: ["off", "70%", "80%", "85%", "90%", "95%"] },
+			{ id: "danger", label: "上下文危险", description: "达到阈值后提示变红，不会低于预警阈值。", currentValue: settingValue("danger"), values: ["90%", "95%", "98%", "100%"] },
+			{ id: "remind", label: "活跃提醒", description: "累计实际工作时间达到间隔后提醒休息。", currentValue: settingValue("remind"), values: ["off", "1h", "2h", "3h", "4h", "6h"] },
+			...FEATURE_FLAGS.map((name): SettingItem => ({
+				id: `feature:${name}`,
+				label: FEATURE_LABELS[name],
+				description: `auto 跟随当前模式；on/off 覆盖模式默认值。内部键：${name}`,
+				currentValue: settingValue(`feature:${name}`),
+				values: ["auto", "on", "off"],
+			})),
+		];
+
+		let previewTimer: ReturnType<typeof setInterval> | null = null;
+		try {
+			await ctx.ui.custom((tui, theme, _kb, done) => {
+				const container = new Container();
+				const title = new Text(theme.fg("accent", theme.bold("Activity 设置")) + "\n" + theme.fg("dim", configPath()), 1, 0);
+				const preview = new Text("", 1, 1);
+				let previewTick = 0;
+				let previewPhrase = featureOn("phrases") ? pick(THINKING_PHRASES) : MINIMAL_THINKING;
+
+				const refreshPreview = () => {
+					if (previewTick % THINKING_PHRASE_TICKS === 0) {
+						previewPhrase = featureOn("phrases")
+							? pickDifferent(config.customPhrases?.length ? [...THINKING_PHRASES, ...config.customPhrases] : THINKING_PHRASES, previewPhrase)
+							: MINIMAL_THINKING;
+					}
+					const presetName = config.frames === "random" ? (resolvedPreset ?? DEFAULT_PRESET) : config.frames;
+					const preset = FRAME_PRESETS[presetName] ?? FRAME_PRESETS[DEFAULT_PRESET]!;
+					const frameIndex = Math.floor((previewTick * TICK_MS) / preset.intervalMs) % preset.frames.length;
+					const frame = theme.fg("accent", preset.frames[frameIndex]!);
+					const text = featureOn("shimmer")
+						? shimmer(previewPhrase, previewTick, accentHexOf(ctx), ctx)
+						: theme.fg("accent", previewPhrase);
+					const randomHint = config.frames === "random" ? theme.fg("dim", `  random→${presetName}`) : "";
+					preview.setText(`${theme.fg("dim", "实时预览")}\n${frame} ${text}${randomHint}`);
+				};
+
+				let settingsList: SettingsList;
+				settingsList = new SettingsList(
+					items,
+					12,
+					getSettingsListTheme(),
+					(id, value) => {
+						const previous = settingValue(id);
+						if (!persistConfig(configWithSetting(id, value), ctx)) {
+							settingsList.updateValue(id, previous);
+							return;
+						}
+						settingsList.updateValue(id, settingValue(id));
+						settingsList.updateValue("warn", settingValue("warn"));
+						settingsList.updateValue("danger", settingValue("danger"));
+						if (id === "frames") {
+							resolvedPreset = null;
+							applyFrames(ctx);
+						}
+						if (id === "tps" && !config.showTokPerSec) {
+							currentTps = 0;
+							tokBucket = 0;
+							tokBucketStartMs = 0;
+						}
+						if (id === "narrate" && !config.narrate) {
+							narratedStatus = null;
+							recentText = "";
+						}
+						thinkingPhrase = null;
+						isRarePhrase = false;
+						waitingPhrase = null;
+						refreshPreview();
+						tui.requestRender();
+					},
+					() => done(undefined),
+					{ enableSearch: true },
+				);
+
+				container.addChild(title);
+				container.addChild(preview);
+				container.addChild(settingsList);
+				refreshPreview();
+				previewTimer = setInterval(() => {
+					previewTick++;
+					refreshPreview();
+					tui.requestRender();
+				}, TICK_MS);
+
+				return {
+					render: (width: number) => container.render(width),
+					invalidate: () => container.invalidate(),
+					handleInput: (data: string) => {
+						settingsList.handleInput(data);
+						tui.requestRender();
+					},
+				};
+			});
+		} finally {
+			if (previewTimer) clearInterval(previewTimer);
+		}
+	};
+
+	const runDoctor = (ctx: ExtensionContext) => {
+		const lines: string[] = [];
+		let hasFailure = false;
+		let hasWarning = false;
+		const ok = (text: string) => lines.push(`✓ ${text}`);
+		const warn = (text: string) => { hasWarning = true; lines.push(`⚠ ${text}`); };
+		const fail = (text: string) => { hasFailure = true; lines.push(`✗ ${text}`); };
+
+		const loaded = readConfig();
+		if (loaded.error) fail(`配置解析失败：${loaded.error}`);
+		else ok(`配置可解析：${configPath()}`);
+
+		const invalidFields: string[] = [];
+		const raw = loaded.raw;
+		if (raw.mode !== undefined && raw.mode !== "lively" && raw.mode !== "minimal") invalidFields.push("mode");
+		for (const key of ["narrate", "debugLog", "showTokPerSec"] as const) {
+			if (raw[key] !== undefined && typeof raw[key] !== "boolean") invalidFields.push(key);
+		}
+		for (const [key, min, max] of [
+			["contextWarnAt", 0, 100],
+			["contextDangerAt", 0, 100],
+			["workRemindAt", 0, 24],
+		] as const) {
+			const value = raw[key];
+			if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max)) {
+				invalidFields.push(key);
+			}
+		}
+		if (raw.customPhrases !== undefined && (!Array.isArray(raw.customPhrases) || raw.customPhrases.some((value) => typeof value !== "string" || !value.trim()))) {
+			invalidFields.push("customPhrases");
+		}
+		if (raw.customActions !== undefined) {
+			const actionsValid = !!raw.customActions && typeof raw.customActions === "object" && !Array.isArray(raw.customActions) &&
+				Object.entries(raw.customActions as Record<string, unknown>).every(([name, values]) =>
+					!!name.trim() && Array.isArray(values) && values.length > 0 && values.every((value) => typeof value === "string" && !!value.trim()));
+			if (!actionsValid) invalidFields.push("customActions");
+		}
+		if (raw.features !== undefined) {
+			const featuresValid = !!raw.features && typeof raw.features === "object" && !Array.isArray(raw.features) &&
+				Object.values(raw.features as Record<string, unknown>).every((value) => typeof value === "boolean");
+			if (!featuresValid) invalidFields.push("features");
+		}
+		if (invalidFields.length > 0) warn(`配置值无效，运行时会忽略：${[...new Set(invalidFields)].join(", ")}`);
+		else ok("配置字段类型与范围有效");
+
+		const rawFrames = loaded.raw.frames;
+		if (rawFrames !== undefined && (typeof rawFrames !== "string" || (rawFrames !== "random" && !FRAME_PRESETS[rawFrames]))) {
+			warn(`配置中的 frames 无效：${String(rawFrames)}`);
+		} else {
+			ok(`当前预设：${loaded.cfg.frames}`);
+		}
+		const rawWarn = typeof loaded.raw.contextWarnAt === "number" ? loaded.raw.contextWarnAt : 80;
+		const rawDanger = typeof loaded.raw.contextDangerAt === "number" ? loaded.raw.contextDangerAt : 95;
+		if (rawDanger < rawWarn) warn(`危险阈值 ${rawDanger}% 低于预警阈值 ${rawWarn}%，运行时会自动校正`);
+		else ok(`上下文阈值：${rawWarn}% / ${rawDanger}%`);
+
+		const invalidPresets = Object.entries(FRAME_PRESETS).filter(([, preset]) =>
+			preset.frames.length === 0 || !Number.isFinite(preset.intervalMs) || preset.intervalMs <= 0);
+		if (!FRAME_PRESETS[DEFAULT_PRESET]) fail(`默认预设不存在：${DEFAULT_PRESET}`);
+		else if (invalidPresets.length > 0) fail(`无效预设：${invalidPresets.map(([name]) => name).join(", ")}`);
+		else ok(`动画预设：${Object.keys(FRAME_PRESETS).length} 个，结构完整`);
+
+		const unknownFeatures = loaded.raw.features && typeof loaded.raw.features === "object" && !Array.isArray(loaded.raw.features)
+			? Object.keys(loaded.raw.features as Record<string, unknown>).filter((name) => !(FEATURE_FLAGS as readonly string[]).includes(name))
+			: [];
+		if (unknownFeatures.length > 0) warn(`未知特性键：${unknownFeatures.join(", ")}`);
+		else ok("特性开关键有效");
+
+		const themeHex = accentHexOf(ctx);
+		if (themeHex) ok(`主题 accent：#${themeHex}`);
+		else warn("主题 accent 不是 RGB 真彩输出，星辉会回退为主题纯色");
+
+		const probePath = path.join(path.dirname(configPath()), `.working-activity-doctor-${process.pid}-${Date.now()}.tmp`);
+		try {
+			fs.mkdirSync(path.dirname(configPath()), { recursive: true });
+			fs.writeFileSync(probePath, "ok\n", { encoding: "utf8", flag: "wx" });
+			fs.unlinkSync(probePath);
+			if (fs.existsSync(configPath())) fs.accessSync(configPath(), fs.constants.R_OK | fs.constants.W_OK);
+			ok("配置目录与文件可读写");
+		} catch (error) {
+			try { if (fs.existsSync(probePath)) fs.unlinkSync(probePath); } catch {}
+			fail(`持久化权限失败：${errorText(error)}`);
+		}
+
+		ctx.ui.notify(`Activity Doctor\n${lines.join("\n")}`, hasFailure ? "error" : hasWarning ? "warning" : "info");
+	};
 
 	// ─── /activity 命令 ──────────────────────────────────────────
 
 	pi.registerCommand("activity", {
-		description: "Working 行：/activity [mode|feature|status|warn|danger|tps|remind|phrase|stats|frames|narrate]",
+		description: "Working 行：/activity [settings|doctor|mode|feature|status|warn|danger|tps|remind|phrase|stats|frames|narrate]",
 		handler: async (args, ctx) => {
 			const apply = (name: string) => {
-				config = { ...config, frames: name };
-				saveConfig();
+				if (!persistConfig({ ...config, frames: name }, ctx)) return;
+				resolvedPreset = null;
 				applyFrames(ctx);
 				ctx.ui.notify(`指示器已切换：${name}`, "info");
 			};
 
 			const parts = args.trim().split(/\s+/).filter(Boolean);
+
+			if (parts[0] === "settings") {
+				await openSettings(ctx);
+				return;
+			}
+
+			if (parts[0] === "doctor") {
+				runDoctor(ctx);
+				return;
+			}
 
 			// /activity status — 显示当前配置
 			if (parts[0] === "status") {
@@ -1521,8 +1986,7 @@ export default function (pi: ExtensionAPI) {
 					ctx.ui.notify("用法：/activity mode lively|minimal", "warning");
 					return;
 				}
-				config = { ...config, mode: parts[1] };
-				saveConfig();
+				if (!persistConfig({ ...config, mode: parts[1] }, ctx)) return;
 				// 立即换池，不等下一轮
 				thinkingPhrase = null;
 				thinkingPhraseTick = THINKING_PHRASE_TICKS;
@@ -1554,8 +2018,7 @@ export default function (pi: ExtensionAPI) {
 				if (parts[2] === "auto") {
 					const features = { ...config.features };
 					delete features[name];
-					config = { ...config, features };
-					saveConfig();
+					if (!persistConfig({ ...config, features }, ctx)) return;
 					ctx.ui.notify(`${name} 已恢复跟随模式（当前${featureOn(name) ? "开" : "关"}）`, "info");
 					return;
 				}
@@ -1563,8 +2026,7 @@ export default function (pi: ExtensionAPI) {
 					ctx.ui.notify(`用法：/activity feature ${name} on|off|auto`, "warning");
 					return;
 				}
-				config = { ...config, features: { ...config.features, [name]: parts[2] === "on" } };
-				saveConfig();
+				if (!persistConfig({ ...config, features: { ...config.features, [name]: parts[2] === "on" } }, ctx)) return;
 				thinkingPhrase = null;
 				thinkingPhraseTick = THINKING_PHRASE_TICKS;
 				isRarePhrase = false;
@@ -1575,15 +2037,18 @@ export default function (pi: ExtensionAPI) {
 
 			// /activity warn <n> — 修改上下文预警阈值
 			if (parts[0] === "warn") {
-				const n = parseInt(parts[1] ?? "", 10);
-				if (isNaN(n) || n < 0 || n > 100) {
+				const n = Number(parts[1]);
+				if (!Number.isFinite(n) || n < 0 || n > 100) {
 					ctx.ui.notify("用法：/activity warn <0-100>，0=关闭预警", "warning");
 					return;
 				}
-				config = { ...config, contextWarnAt: n };
-				saveConfig();
+				const previousDanger = config.contextDangerAt ?? 95;
+				const nextDanger = Math.max(n, previousDanger);
+				if (!persistConfig({ ...config, contextWarnAt: n, contextDangerAt: nextDanger }, ctx)) return;
 				ctx.ui.notify(
-					n === 0 ? "上下文预警已关闭" : `上下文预警阈值已设为 ${n}%`,
+					n === 0
+						? "上下文预警已关闭"
+						: `上下文预警阈值已设为 ${n}%${nextDanger > previousDanger ? `，危险阈值同步为 ${nextDanger}%` : ""}`,
 					"info",
 				);
 				return;
@@ -1591,14 +2056,13 @@ export default function (pi: ExtensionAPI) {
 
 			// /activity danger <n> — 修改红色危险阈值
 			if (parts[0] === "danger") {
-				const n = parseInt(parts[1] ?? "", 10);
+				const n = Number(parts[1]);
 				const warnAt = config.contextWarnAt ?? 80;
-				if (isNaN(n) || n < warnAt || n > 100) {
+				if (!Number.isFinite(n) || n < warnAt || n > 100) {
 					ctx.ui.notify(`用法：/activity danger <${warnAt}-100>`, "warning");
 					return;
 				}
-				config = { ...config, contextDangerAt: n };
-				saveConfig();
+				if (!persistConfig({ ...config, contextDangerAt: n }, ctx)) return;
 				ctx.ui.notify(`上下文危险阈值已设为 ${n}%`, "info");
 				return;
 			}
@@ -1610,13 +2074,12 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 				const on = parts[1] === "on";
-				config = { ...config, showTokPerSec: on };
+				if (!persistConfig({ ...config, showTokPerSec: on }, ctx)) return;
 				if (!on) {
 					currentTps = 0;
 					tokBucket = 0;
 					tokBucketStartMs = 0;
 				}
-				saveConfig();
 				ctx.ui.notify(on ? "~tok/s 显示已开启（流式估算）" : "~tok/s 显示已关闭", "info");
 				return;
 			}
@@ -1628,8 +2091,7 @@ export default function (pi: ExtensionAPI) {
 					ctx.ui.notify("用法：/activity remind <0-24>，0=关闭", "warning");
 					return;
 				}
-				config = { ...config, workRemindAt: hours };
-				saveConfig();
+				if (!persistConfig({ ...config, workRemindAt: hours }, ctx)) return;
 				ctx.ui.notify(hours === 0 ? "累计活跃提醒已关闭" : `每累计活跃 ${hours} 小时提醒一次`, "info");
 				return;
 			}
@@ -1646,11 +2108,10 @@ export default function (pi: ExtensionAPI) {
 						ctx.ui.notify("这条短语已经在池子里了", "info");
 						return;
 					}
-					config = {
+					if (!persistConfig({
 						...config,
 						customPhrases: [...(config.customPhrases ?? []), phrase],
-					};
-					saveConfig();
+					}, ctx)) return;
 					ctx.ui.notify(`已添加自定义短语：${phrase}`, "info");
 					return;
 				}
@@ -1691,8 +2152,7 @@ export default function (pi: ExtensionAPI) {
 					ctx.ui.notify("用法：/activity narrate on|off", "warning");
 					return;
 				}
-				config = { ...config, narrate: on };
-				saveConfig();
+				if (!persistConfig({ ...config, narrate: on }, ctx)) return;
 				if (!on) {
 					narratedStatus = null;
 					recentText = "";

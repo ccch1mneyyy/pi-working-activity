@@ -1,6 +1,6 @@
 # pi-working-activity
 
-> 让 pi 的 Working 行活过来——实时工具动态 + 俏皮中文文案 + 稀有彩虹彩蛋 + 模型自述 + 上下文预警。
+> 让 pi 的 Working 行活过来——实时工具动态与进度 + 俏皮中文文案 + 稀有彩虹彩蛋 + 模型自述 + 上下文预警。
 
 ## 功能一览
 
@@ -13,6 +13,17 @@
 跑命令 npm run build
 搜搜 NARRATE_MIN_MS
 ```
+
+### 📈 实时工具进度
+监听 `tool_execution_update`，优先读取工具返回的百分比、阶段和状态；对 bash 等流式输出，也会识别常见的下载、构建、测试和部署进度。
+
+```
+拉取模型权重 · 42% · 8s
+跑命令 npm test · Testing integration · 12s
+部署一下 staging · Deploying assets · 31s
+```
+
+普通输出不会直接塞进 Working 行，只有结构化进度、百分比和可识别阶段会展示。
 
 ### ⏩ 快工具队列重播
 执行时间 < 1.5s 的工具一闪而过？不会。快工具排队逐个播 1s，最后一条粘留 3s，让你看得到。
@@ -68,10 +79,10 @@
 - **0–6 点**：思考池混入 `修仙中…` `夜猫子出没` `熬夜冠军` 等深夜专属文案
 - **周末**：首次会话弹一句 `周末也在卷？` `放假也陪你`
 
-### 🎨 30+ 动画预设
+### 🎨 28 个动画预设
 `/activity` 打开交互选择器，或 `/activity frames <name>` 直接切：
 
-`claude` `braille` `moon` `comet` `spark` `breathe` `dots` `circle` `pulse` `star2` `flip` `aesthetic` `hamburger` `random` …
+`claude` `braille` `moon` `comet` `spark` `breathe` `dots` `circle` `star2` `flip` `aesthetic` `hamburger` `random` …
 
 ### 😐 英文冷幽默
 `lol` `hm` `oh` `ok` `um` `heh` `uh` `nah` `mm` `wow` `nice` `rgrg` `done` `again` `gg` `ez`
@@ -123,6 +134,20 @@ Pi 的流式事件不提供逐段 usage，因此这是实时估算值；收尾�
 }
 ```
 
+### ⚙ 交互设置面板
+`/activity settings` 打开可搜索的设置面板，统一调整模式、动画、自述、速率、上下文阈值、活跃提醒和全部特性开关。
+
+面板顶部会使用当前主题实时播放动画和文案预览；每次切换立即持久化，不需要退出面板。
+
+### 🩺 内置 Doctor
+`/activity doctor` 一次检查：
+
+- 配置 JSON 是否可解析、阈值关系是否有效
+- 当前预设和全部动画结构是否完整
+- 特性键是否认识
+- 当前主题能否提取 RGB accent
+- 配置目录与文件是否真正可读写
+
 ### 🎭 双模式 + 特性开关
 花埑功能全部可选。总开关一键切换：
 
@@ -169,6 +194,8 @@ pi install npm:pi-working-activity
 
 | 命令 | 说明 |
 |------|------|
+| `/activity settings` | 打开可搜索设置面板，实时预览动画和文案 |
+| `/activity doctor` | 检查配置、主题、预设和持久化权限 |
 | `/activity` | 打开动画预设交互选择器 |
 | `/activity frames <name>` | 直接切换预设，如 `/activity frames claude` |
 | `/activity frames random` | 每轮随机一个预设 |
