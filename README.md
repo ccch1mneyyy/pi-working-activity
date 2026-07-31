@@ -48,7 +48,7 @@
 四层特效叠加：平滑色相梯度慢滚 + 亮度波浪呼吸 + 一道带下划线的高光从左扫到右 + 两侧金边花饰轮转。比 1.0 的均匀彩虹有质感得多。
 
 ### ⏵ 模型自述
-可选功能。开关打开后，扩展通过 `context` 事件向模型注入一条约定：每个步骤开始时写 `⏵ 你在做什么（≤20 字）`。扩展实时解析流式输出，把自述显示在 Working 行。
+默认开启。扩展通过 `context` 事件向模型注入一条约定：每个步骤开始时写 `⏵ 你在做什么（≤20 字）`。扩展实时解析流式输出，把自述显示在 Working 行。不需要可在配置里设 `"narrate": false` 或 `/activity narrate off`。
 
 ```
 ⏵ 查一下报错原因        →  Working 行：查一下报错原因 · 搜搜 error.log
@@ -205,7 +205,7 @@ pi install npm:pi-working-activity
 | 键 | 类型 | 默认值 | 说明 |
 |---|------|--------|------|
 | `frames` | `string` | `"moon"` | 动画预设名，`"random"` 每轮随机 |
-| `narrate` | `boolean` | `false` | ⏵ 模型自述开关 |
+| `narrate` | `boolean` | `true` | ⏵ 模型自述开关（默认开，显式 `false` 关闭） |
 | `contextWarnAt` | `number` | `80` | 上下文预警阈值（百分比），`0` 关闭 |
 | `contextDangerAt` | `number` | `95` | 上下文危险阈值，超过后变红 |
 | `showTokPerSec` | `boolean` | `false` | 流式输出时显示 `~tok/s` 估算速率 |

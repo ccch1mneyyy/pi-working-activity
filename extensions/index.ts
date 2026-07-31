@@ -158,7 +158,7 @@ function normalizeThresholds(cfg: Config): Config {
 
 function readConfig(): ConfigReadResult {
 	if (!fs.existsSync(configPath())) {
-		return { cfg: { frames: DEFAULT_PRESET }, raw: {} };
+		return { cfg: { frames: DEFAULT_PRESET, narrate: true }, raw: {} };
 	}
 	try {
 		const parsed = JSON.parse(fs.readFileSync(configPath(), "utf8")) as unknown;
@@ -166,7 +166,8 @@ function readConfig(): ConfigReadResult {
 			throw new Error("配置根节点必须是 JSON 对象");
 		}
 		const raw = parsed as Record<string, unknown>;
-		const cfg: Config = { frames: DEFAULT_PRESET };
+		// narrate 默认开启：未显式配置时视为 true（显式 false 仍可关闭）
+		const cfg: Config = { frames: DEFAULT_PRESET, narrate: true };
 		if (typeof raw.frames === "string" && (FRAME_PRESETS[raw.frames] || raw.frames === "random")) {
 			cfg.frames = raw.frames;
 		}
@@ -206,7 +207,7 @@ function readConfig(): ConfigReadResult {
 		return { cfg: normalizeThresholds(cfg), raw };
 	} catch (error) {
 		return {
-			cfg: { frames: DEFAULT_PRESET },
+			cfg: { frames: DEFAULT_PRESET, narrate: true },
 			raw: {},
 			error: errorText(error),
 		};
