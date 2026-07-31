@@ -81,8 +81,10 @@ const DEFAULT_PRESET = "moon";
 
 /** git 分支缓存 TTL：避免每个 git 工具都跑一次 git 命令 */
 const GIT_BRANCH_TTL_MS = 20_000;
-/** 缓存值：null = 非 git 仓库或获取失败；atMs 用于 TTL 过期 */
-let gitBranchCache: { branch: string | null; atMs: number } | null = null;
+/** 缓存值：cwd 维度（跨项目不串），null = 非 git 仓库或获取失败；atMs 用于 TTL 过期 */
+let gitBranchCache: { cwd: string; branch: string | null; atMs: number } | null = null;
+/** 刷新序号：丢弃过期响应，防止快速切项目时旧结果覆盖新缓存 */
+let gitBranchRequestSeq = 0;
 /** 常见 git 工具名（含 gh/github） */
 const GIT_TOOL_RE = /^(?:git|git_diff|git_commit|git_push|git_pull|git_checkout|git_branch|git_merge|git_rebase|github|gh)$/i;
 
@@ -111,12 +113,14 @@ function runGitBranch(cwd: string): Promise<string | null> {
 	});
 }
 
-/** fire-and-forget 刷新分支缓存：TTL 内不重复发起（首帧可能未就绪，下次工具即显示） */
-function refreshGitBranch(ctx: ExtensionContext): void {
-	if (gitBranchCache && Date.now() - gitBranchCache.atMs < GIT_BRANCH_TTL_MS) return;
-	gitBranchCache = { branch: null, atMs: Date.now() }; // 防抖占位
-	void runGitBranch(ctx.cwd).then((branch) => {
-		gitBranchCache = { branch, atMs: Date.now() };
+/** fire-and-forget 刷新分支缓存：同目录 TTL 内不重复发起（首帧可能未就绪，下次工具即显示） */
+function refreshGitBranch(cwd: string): void {
+	if (gitBranchCache && gitBranchCache.cwd === cwd && Date.now() - gitBranchCache.atMs < GIT_BRANCH_TTL_MS) return;
+	const token = ++gitBranchRequestSeq;
+	gitBranchCache = { cwd, branch: null, atMs: Date.now() }; // 防抖占位
+	void runGitBranch(cwd).then((branch) => {
+		if (gitBranchRequestSeq !== token) return; // 已有更新的请求，丢弃过期响应
+		gitBranchCache = { cwd, branch, atMs: Date.now() };
 	});
 }
 /** 收尾闪现的扩展状态 key */
@@ -1670,9 +1674,16 @@ export default function (pi: ExtensionAPI) {
 		const name = String(event.toolName ?? "tool");
 		const isSubagent = isSubagentTool(name);
 		if (isSubagent) subagentTotal++;
-		// git 操作：异步刷新分支缓存，工具行显示当前分支
+		// git 操作：异步刷新分支缓存（bash 类工具优先用 args.cwd），工具行显示当前分支
 		const isGit = isGitTool(name, event.args);
-		if (isGit) refreshGitBranch(ctx);
+		if (isGit) {
+			const argsRec = (event.args ?? {}) as Record<string, unknown>;
+			const toolCwd =
+				typeof argsRec.cwd === "string" && argsRec.cwd.trim()
+					? argsRec.cwd
+					: ctx.cwd;
+			refreshGitBranch(toolCwd);
+		}
 		active.set(id, {
 			id,
 			name,
@@ -2509,10 +2520,24 @@ export default function (pi: ExtensionAPI) {
 							ctx.ui.notify(`导入失败：${result.error}`, "error");
 							return;
 						}
-						writeConfig(result.cfg, result.raw);
+						// 净化：已知键由解析结果决定（非法值即丢弃），未知键原样保留
+						const knownKeys = new Set([
+							"frames", "customPhrases", "narrate", "debugLog",
+							"contextWarnAt", "contextDangerAt", "showTokPerSec",
+							"workRemindAt", "customActions", "mode", "features",
+						]);
+						const cleanRaw: Record<string, unknown> = {};
+						for (const [k, v] of Object.entries(result.raw)) {
+							if (!knownKeys.has(k)) cleanRaw[k] = v;
+						}
+						const merged = { ...cleanRaw, ...(result.cfg as Record<string, unknown>) };
+						writeConfig(result.cfg, merged);
 						config = result.cfg;
-						rawConfig = { ...result.raw };
+						rawConfig = { ...merged };
 						configReadError = null;
+						// 导入的 frames 可能变了：重置并重刷指示器动画
+						resolvedPreset = null;
+						applyFrames(ctx);
 						ctx.ui.notify("配置已导入并生效", "info");
 					} catch (error) {
 						ctx.ui.notify(`导入失败：${errorText(error)}`, "error");
