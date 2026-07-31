@@ -73,6 +73,26 @@
 连续 5+ 工具触发 `火力全开×N`（并行工具也算连击）。10+ 工具收尾时显示 `十连击`。
 
 ### ⏱ 慢工具提示
+
+### 📈 工具 ETA
+工具回报进度百分比（`percent` / `percentage` / `progressPercent`，或 `current/total`）时，按已耗时推算剩余时间：
+
+```
+拉取模型权重 · 42% · 还剩~11s · 3s
+```
+
+没有百分比进度的工具不显示，不影响其他信息。
+
+### 🌿 git 分支上下文
+检测到 git 操作（`git`/`gh` 等工具名，或 bash 类命令里带 `git `）时，Working 行显示当前分支（缓存 20s，异步获取不阻塞）：
+
+```
+拉代码 · main · 3s
+```
+
+非 git 仓库自动隐藏。
+
+### ⏱ 慢工具提示
 单工具超 30s 亮 `这个有点慢 ·` 前缀。
 
 ### 🌙 时间感知
@@ -237,6 +257,8 @@ pi install npm:pi-working-activity
 | `/activity phrase add <文案>` | 追加自定义思考短语 |
 | `/activity phrase list` | 列出所有自定义短语 |
 | `/activity stats` | 本轮+会话统计：工具数、想/干比、💰成本、🔥token、缓存命中、思考 token |
+| `/activity config export` | 导出当前配置 JSON 到当前目录 `working-activity.export.json` |
+| `/activity config import <路径>` | 从文件导入配置并立即生效（自动校验） |
 
 ## 模型自述原理
 

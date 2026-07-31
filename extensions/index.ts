@@ -14,6 +14,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { execFile } from "node:child_process";
 import { getAgentDir, getSettingsListTheme } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Container, type SettingItem, SettingsList, Text } from "@earendil-works/pi-tui";
@@ -75,6 +76,49 @@ const FRAME_PRESETS: Record<string, { frames: string[]; intervalMs: number }> = 
 	toggle: { frames: ["⊶", "⊷"], intervalMs: 300 },
 };
 const DEFAULT_PRESET = "moon";
+
+// ─── git 分支上下文感知 ─────────────────────────────────────────
+
+/** git 分支缓存 TTL：避免每个 git 工具都跑一次 git 命令 */
+const GIT_BRANCH_TTL_MS = 20_000;
+/** 缓存值：null = 非 git 仓库或获取失败；atMs 用于 TTL 过期 */
+let gitBranchCache: { branch: string | null; atMs: number } | null = null;
+/** 常见 git 工具名（含 gh/github） */
+const GIT_TOOL_RE = /^(?:git|git_diff|git_commit|git_push|git_pull|git_checkout|git_branch|git_merge|git_rebase|github|gh)$/i;
+
+/** 判断是否为 git 操作：工具名命中，或 bash 类工具的 command 里带 git */
+function isGitTool(toolName: string, args: unknown): boolean {
+	if (GIT_TOOL_RE.test(toolName.trim())) return true;
+	if (/^(?:bash|shell|cmd|powershell|pwsh)$/i.test(toolName.trim())) {
+		const record = (args ?? {}) as Record<string, unknown>;
+		const cmd = typeof record.command === "string" ? record.command : record.cmdline;
+		return typeof cmd === "string" && /\bgit\s+/.test(cmd);
+	}
+	return false;
+}
+
+/** 异步读当前分支名（带超时，失败返回 null） */
+function runGitBranch(cwd: string): Promise<string | null> {
+	return new Promise((resolve) => {
+		execFile("git", ["branch", "--show-current"], { cwd, timeout: 800, windowsHide: true }, (err, stdout) => {
+			if (err) {
+				resolve(null);
+				return;
+			}
+			const branch = stdout.trim();
+			resolve(branch.length > 0 ? branch : null);
+		});
+	});
+}
+
+/** fire-and-forget 刷新分支缓存：TTL 内不重复发起（首帧可能未就绪，下次工具即显示） */
+function refreshGitBranch(ctx: ExtensionContext): void {
+	if (gitBranchCache && Date.now() - gitBranchCache.atMs < GIT_BRANCH_TTL_MS) return;
+	gitBranchCache = { branch: null, atMs: Date.now() }; // 防抖占位
+	void runGitBranch(ctx.cwd).then((branch) => {
+		gitBranchCache = { branch, atMs: Date.now() };
+	});
+}
 /** 收尾闪现的扩展状态 key */
 const DONE_STATUS_KEY = "working-activity-done";
 /** 空闲时展示模型切换梗的状态 key */
@@ -156,55 +200,64 @@ function normalizeThresholds(cfg: Config): Config {
 	return dangerAt < warnAt ? { ...cfg, contextDangerAt: warnAt } : cfg;
 }
 
+/** 把任意 JSON 对象解析为合法 Config（未知键保留在 raw，供写回） */
+function parseConfigObject(parsed: unknown): { cfg: Config; raw: Record<string, unknown>; error?: string } {
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+		return { cfg: { frames: DEFAULT_PRESET, narrate: true }, raw: {}, error: "配置根节点必须是 JSON 对象" };
+	}
+	const raw = parsed as Record<string, unknown>;
+	// narrate 默认开启：未显式配置时视为 true（显式 false 仍可关闭）
+	const cfg: Config = { frames: DEFAULT_PRESET, narrate: true };
+	if (typeof raw.frames === "string" && (FRAME_PRESETS[raw.frames] || raw.frames === "random")) {
+		cfg.frames = raw.frames;
+	}
+	if (Array.isArray(raw.customPhrases)) {
+		cfg.customPhrases = raw.customPhrases.filter((s: unknown) => typeof s === "string" && s.trim());
+	}
+	if (typeof raw.narrate === "boolean") cfg.narrate = raw.narrate;
+	if (typeof raw.debugLog === "boolean") cfg.debugLog = raw.debugLog;
+	if (typeof raw.contextWarnAt === "number" && Number.isFinite(raw.contextWarnAt) && raw.contextWarnAt >= 0 && raw.contextWarnAt <= 100) {
+		cfg.contextWarnAt = raw.contextWarnAt;
+	}
+	if (typeof raw.contextDangerAt === "number" && Number.isFinite(raw.contextDangerAt) && raw.contextDangerAt >= 0 && raw.contextDangerAt <= 100) {
+		cfg.contextDangerAt = raw.contextDangerAt;
+	}
+	if (typeof raw.showTokPerSec === "boolean") cfg.showTokPerSec = raw.showTokPerSec;
+	if (typeof raw.workRemindAt === "number" && Number.isFinite(raw.workRemindAt) && raw.workRemindAt >= 0 && raw.workRemindAt <= 24) {
+		cfg.workRemindAt = raw.workRemindAt;
+	}
+	if (raw.customActions && typeof raw.customActions === "object" && !Array.isArray(raw.customActions)) {
+		const ca: Record<string, string[]> = {};
+		for (const [key, value] of Object.entries(raw.customActions)) {
+			const actions = Array.isArray(value)
+				? value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0).map((entry) => entry.trim())
+				: [];
+			if (key.trim() && actions.length > 0) ca[key.trim()] = actions;
+		}
+		if (Object.keys(ca).length > 0) cfg.customActions = ca;
+	}
+	if (raw.mode === "lively" || raw.mode === "minimal") cfg.mode = raw.mode;
+	if (raw.features && typeof raw.features === "object" && !Array.isArray(raw.features)) {
+		const f: Record<string, boolean> = {};
+		for (const [k, v] of Object.entries(raw.features)) {
+			if (typeof v === "boolean") f[k] = v;
+		}
+		if (Object.keys(f).length > 0) cfg.features = f;
+	}
+	return { cfg: normalizeThresholds(cfg), raw };
+}
+
 function readConfig(): ConfigReadResult {
 	if (!fs.existsSync(configPath())) {
 		return { cfg: { frames: DEFAULT_PRESET, narrate: true }, raw: {} };
 	}
 	try {
 		const parsed = JSON.parse(fs.readFileSync(configPath(), "utf8")) as unknown;
-		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-			throw new Error("配置根节点必须是 JSON 对象");
+		const result = parseConfigObject(parsed);
+		if (result.error) {
+			return { cfg: { frames: DEFAULT_PRESET, narrate: true }, raw: {}, error: result.error };
 		}
-		const raw = parsed as Record<string, unknown>;
-		// narrate 默认开启：未显式配置时视为 true（显式 false 仍可关闭）
-		const cfg: Config = { frames: DEFAULT_PRESET, narrate: true };
-		if (typeof raw.frames === "string" && (FRAME_PRESETS[raw.frames] || raw.frames === "random")) {
-			cfg.frames = raw.frames;
-		}
-		if (Array.isArray(raw.customPhrases)) {
-			cfg.customPhrases = raw.customPhrases.filter((s: unknown) => typeof s === "string" && s.trim());
-		}
-		if (typeof raw.narrate === "boolean") cfg.narrate = raw.narrate;
-		if (typeof raw.debugLog === "boolean") cfg.debugLog = raw.debugLog;
-		if (typeof raw.contextWarnAt === "number" && Number.isFinite(raw.contextWarnAt) && raw.contextWarnAt >= 0 && raw.contextWarnAt <= 100) {
-			cfg.contextWarnAt = raw.contextWarnAt;
-		}
-		if (typeof raw.contextDangerAt === "number" && Number.isFinite(raw.contextDangerAt) && raw.contextDangerAt >= 0 && raw.contextDangerAt <= 100) {
-			cfg.contextDangerAt = raw.contextDangerAt;
-		}
-		if (typeof raw.showTokPerSec === "boolean") cfg.showTokPerSec = raw.showTokPerSec;
-		if (typeof raw.workRemindAt === "number" && Number.isFinite(raw.workRemindAt) && raw.workRemindAt >= 0 && raw.workRemindAt <= 24) {
-			cfg.workRemindAt = raw.workRemindAt;
-		}
-		if (raw.customActions && typeof raw.customActions === "object" && !Array.isArray(raw.customActions)) {
-			const ca: Record<string, string[]> = {};
-			for (const [key, value] of Object.entries(raw.customActions)) {
-				const actions = Array.isArray(value)
-					? value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0).map((entry) => entry.trim())
-					: [];
-				if (key.trim() && actions.length > 0) ca[key.trim()] = actions;
-			}
-			if (Object.keys(ca).length > 0) cfg.customActions = ca;
-		}
-		if (raw.mode === "lively" || raw.mode === "minimal") cfg.mode = raw.mode;
-		if (raw.features && typeof raw.features === "object" && !Array.isArray(raw.features)) {
-			const f: Record<string, boolean> = {};
-			for (const [k, v] of Object.entries(raw.features)) {
-				if (typeof v === "boolean") f[k] = v;
-			}
-			if (Object.keys(f).length > 0) cfg.features = f;
-		}
-		return { cfg: normalizeThresholds(cfg), raw };
+		return { cfg: result.cfg, raw: result.raw };
 	} catch (error) {
 		return {
 			cfg: { frames: DEFAULT_PRESET, narrate: true },
@@ -728,6 +781,49 @@ function extractToolProgress(partialResult: unknown): string | null {
 	return last && STAGE_PATTERN.test(last) ? short(last, 36) : null;
 }
 
+/** 提取 0–100 的整数百分比（无则 null），供 ETA 推算 */
+function extractToolPercent(partialResult: unknown): number | null {
+	if (!partialResult || typeof partialResult !== "object") return null;
+	const result = partialResult as Record<string, unknown>;
+	const details = result.details && typeof result.details === "object"
+		? result.details as Record<string, unknown>
+		: {};
+	const rawPercent = (value: unknown): number | null => {
+		if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return null;
+		const percent = value <= 1 ? value * 100 : value;
+		if (percent > 100) return null;
+		return Math.round(percent);
+	};
+	for (const source of [details, result]) {
+		for (const key of ["percent", "percentage", "progressPercent"]) {
+			const p = rawPercent(source[key]);
+			if (p != null) return p;
+		}
+		const direct = rawPercent(source.progress);
+		if (direct != null) return direct;
+		if (source.progress && typeof source.progress === "object") {
+			const p = source.progress as Record<string, unknown>;
+			const direct2 = rawPercent(p.percent ?? p.percentage);
+			if (direct2 != null) return direct2;
+			const current = typeof p.current === "number" ? p.current : p.completed;
+			const total = p.total;
+			if (typeof current === "number" && typeof total === "number" && total > 0) {
+				return Math.min(100, Math.max(0, Math.round((current / total) * 100)));
+			}
+		}
+	}
+	return null;
+}
+
+/** 工具 ETA：按已耗时与完成百分比推算剩余秒数（无百分比/已完成为空串） */
+function toolEtaText(tool: ActiveTool): string {
+	if (tool.percent == null || tool.percent <= 0 || tool.percent >= 100) return "";
+	const elapsedMs = Date.now() - tool.startedAt;
+	const remainingMs = (elapsedMs * (100 - tool.percent)) / tool.percent;
+	const secs = Math.max(1, Math.round(remainingMs / 1000));
+	return ` · 还剩~${secs}s`;
+}
+
 function basename(p: string): string {
 	const norm = p.replace(/\\/g, "/");
 	const i = norm.lastIndexOf("/");
@@ -939,6 +1035,10 @@ type ActiveTool = {
 	name: string;
 	label: string;
 	progress: string | null;
+	/** 0–100 整数百分比（无则 null），用于 ETA 推算 */
+	percent: number | null;
+	/** 是否为 git 操作（决定是否显示当前分支名） */
+	isGit: boolean;
 	startedAt: number;
 	isSubagent: boolean;
 };
@@ -1264,12 +1364,17 @@ export default function (pi: ExtensionAPI) {
 
 		const cur = list[rotateIdx % list.length]!;
 		const elapsed = Date.now() - cur.startedAt;
+		const eta = toolEtaText(cur);
 		const secs =
-			elapsed >= SHOW_ELAPSED_AFTER_MS
+			!eta && elapsed >= SHOW_ELAPSED_AFTER_MS
 				? theme.fg("dim", ` ${Math.floor(elapsed / 1000)}s`)
 				: "";
 		const more = list.length > 1 ? theme.fg("dim", ` · 另 ${list.length - 1} 项`) : "";
 		const progress = cur.progress ? theme.fg("dim", ` · ${cur.progress}`) : "";
+		const git =
+			cur.isGit && gitBranchCache?.branch
+				? theme.fg("dim", ` · ${gitBranchCache.branch}`)
+				: "";
 		// 子代理并行提示：只统计当前仍在执行的子代理。
 		const activeSubagentCount = list.filter((tool) => tool.isSubagent).length;
 		const subHint =
@@ -1299,7 +1404,9 @@ export default function (pi: ExtensionAPI) {
 						slow +
 						fx(narratedStatus!) +
 						theme.fg("dim", ` · ${cur.label}`) +
+						git +
 						progress +
+						eta +
 						secs +
 						more +
 						subHint,
@@ -1308,7 +1415,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			ctx.ui.setWorkingMessage(
-				ctxWarn + combo + slow + fx(cur.label) + progress + secs + more + subHint,
+				ctxWarn + combo + slow + fx(cur.label) + git + progress + eta + secs + more + subHint,
 			);
 	};
 
@@ -1563,6 +1670,9 @@ export default function (pi: ExtensionAPI) {
 		const name = String(event.toolName ?? "tool");
 		const isSubagent = isSubagentTool(name);
 		if (isSubagent) subagentTotal++;
+		// git 操作：异步刷新分支缓存，工具行显示当前分支
+		const isGit = isGitTool(name, event.args);
+		if (isGit) refreshGitBranch(ctx);
 		active.set(id, {
 			id,
 			name,
@@ -1570,6 +1680,8 @@ export default function (pi: ExtensionAPI) {
 				? summarize(name, event.args, config.customActions)
 				: plainLabel(name, event.args),
 			progress: null,
+			percent: null,
+			isGit,
 			startedAt: Date.now(),
 			isSubagent,
 		});
@@ -1583,8 +1695,17 @@ export default function (pi: ExtensionAPI) {
 		const tool = id ? active.get(id) : undefined;
 		if (!tool) return;
 		const progress = extractToolProgress(event.partialResult);
-		if (!progress || progress === tool.progress) return;
-		tool.progress = progress;
+		const percent = extractToolPercent(event.partialResult);
+		let changed = false;
+		if (progress && progress !== tool.progress) {
+			tool.progress = progress;
+			changed = true;
+		}
+		if (percent != null && percent !== tool.percent) {
+			tool.percent = percent;
+			changed = true;
+		}
+		if (!changed) return;
 		lastActivityMs = Date.now();
 		dbg("tool_progress", { name: tool.name, progress });
 		render(ctx);
@@ -2117,7 +2238,7 @@ export default function (pi: ExtensionAPI) {
 	// ─── /activity 命令 ──────────────────────────────────────────
 
 	pi.registerCommand("activity", {
-		description: "Working 行：/activity [settings|doctor|mode|feature|status|warn|danger|tps|remind|phrase|stats|frames|narrate]",
+		description: "Working 行：/activity [settings|doctor|mode|feature|status|warn|danger|tps|remind|phrase|stats|frames|narrate|config]",
 		handler: async (args, ctx) => {
 			const apply = (name: string) => {
 				if (!persistConfig({ ...config, frames: name }, ctx)) return;
@@ -2360,6 +2481,45 @@ export default function (pi: ExtensionAPI) {
 						: "模型自述已关闭：回到预设文案模式",
 					"info",
 				);
+				return;
+			}
+
+			// /activity config export — 导出当前配置到 cwd；import <path> — 从文件导入
+			if (parts[0] === "config") {
+				if (parts[1] === "export") {
+					try {
+						const out = path.join(ctx.cwd, "working-activity.export.json");
+						fs.writeFileSync(out, JSON.stringify({ ...rawConfig, ...config }, null, 2) + "\n", "utf8");
+						ctx.ui.notify(`配置已导出：${out}`, "info");
+					} catch (error) {
+						ctx.ui.notify(`导出失败：${errorText(error)}`, "error");
+					}
+					return;
+				}
+				if (parts[1] === "import") {
+					const file = parts[2];
+					if (!file) {
+						ctx.ui.notify("用法：/activity config import <路径>", "warning");
+						return;
+					}
+					try {
+						const text = fs.readFileSync(file, "utf8");
+						const result = parseConfigObject(JSON.parse(text) as unknown);
+						if (result.error) {
+							ctx.ui.notify(`导入失败：${result.error}`, "error");
+							return;
+						}
+						writeConfig(result.cfg, result.raw);
+						config = result.cfg;
+						rawConfig = { ...result.raw };
+						configReadError = null;
+						ctx.ui.notify("配置已导入并生效", "info");
+					} catch (error) {
+						ctx.ui.notify(`导入失败：${errorText(error)}`, "error");
+					}
+					return;
+				}
+				ctx.ui.notify("用法：/activity config export | config import <路径>", "info");
 				return;
 			}
 
