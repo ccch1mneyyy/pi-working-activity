@@ -1195,6 +1195,22 @@ export default function (pi: ExtensionAPI) {
 	/** 去重：已累加过 usage 的 assistant 消息 timestamp */
 	const seenMessageTs = new Set<number>();
 
+	/** ANSI 转义码正则(终端颜色/粗体/斜体等) */
+	const ANSI_RE = /\x1b\[[0-9;]*m/g;
+	/** 剥离 ANSI,得到纯文本 —— 手机端不是终端,显示不了转义码 */
+	function stripAnsi(s: string): string {
+		return s.replace(ANSI_RE, "");
+	}
+	/** 设置 Working 行并 emit 纯文本到 pi.events 总线。
+	 *  PiPilot relay 监听 "working-activity:status" 转发给手机灵动岛。 */
+	function setWorkingAndEmit(ctx: ExtensionContext, msg: string | undefined) {
+		ctx.ui.setWorkingMessage(msg);
+		// 测试环境的 mock 没有 events,防御性可选链。
+		pi.events?.emit("working-activity:status", {
+			text: msg ? stripAnsi(msg) : null,
+		});
+	}
+
 	const applyFrames = (ctx: ExtensionContext) => {
 		if (config.frames === "random") {
 			if (!resolvedPreset) {
@@ -1210,7 +1226,7 @@ export default function (pi: ExtensionAPI) {
 
 	const render = (ctx: ExtensionContext) => {
 		if (!busy) {
-			ctx.ui.setWorkingMessage(undefined);
+			setWorkingAndEmit(ctx, undefined);
 			return;
 		}
 		const theme = ctx.ui.theme;
@@ -1251,7 +1267,7 @@ export default function (pi: ExtensionAPI) {
 				narratedStatus &&
 				now - narratedAtMs < NARRATE_MIN_MS
 			) {
-				ctx.ui.setWorkingMessage(
+				setWorkingAndEmit(ctx, 
 					ctxWarn + tpsPrefix + fx(narratedStatus) +
 					theme.fg("dim", DOT_FRAMES[Math.floor(tick / 3) % DOT_FRAMES.length]!),
 				);
@@ -1272,7 +1288,7 @@ export default function (pi: ExtensionAPI) {
 				const label = showingDone.item.isError
 					? theme.fg("error", showingDone.item.label)
 					: fx(showingDone.item.label);
-				ctx.ui.setWorkingMessage(ctxWarn + label + mark);
+				setWorkingAndEmit(ctx, ctxWarn + label + mark);
 				return;
 			}
 			// 队列空了：最后一个粘留 3s
@@ -1283,7 +1299,7 @@ export default function (pi: ExtensionAPI) {
 				const label = lastSticky.item.isError
 					? theme.fg("error", lastSticky.item.label)
 					: fx(lastSticky.item.label);
-				ctx.ui.setWorkingMessage(ctxWarn + label + mark);
+				setWorkingAndEmit(ctx, ctxWarn + label + mark);
 				return;
 			}
 			// 还没收到第一个 token：轮换等待文案（~2.6s 换一句）
@@ -1295,7 +1311,7 @@ export default function (pi: ExtensionAPI) {
 					waitingPhraseTick = 0;
 				}
 				const dots = DOT_FRAMES[Math.floor(tick / 3) % DOT_FRAMES.length]!;
-				ctx.ui.setWorkingMessage(
+				setWorkingAndEmit(ctx, 
 					ctxWarn + tpsPrefix +
 					fx(waitingPhrase) + theme.fg("dim", dots),
 				);
@@ -1304,7 +1320,7 @@ export default function (pi: ExtensionAPI) {
 			// 模型自述：近期有活动则显示；过期（超过宽限且播完最低时长）永久丢弃
 			if (config.narrate && narratedStatus) {
 				if (now - lastActivityMs < NARRATE_GRACE_MS) {
-					ctx.ui.setWorkingMessage(
+					setWorkingAndEmit(ctx, 
 						ctxWarn + tpsPrefix +
 						fx(narratedStatus) +
 						theme.fg("dim", DOT_FRAMES[Math.floor(tick / 3) % DOT_FRAMES.length]!),
@@ -1356,7 +1372,7 @@ export default function (pi: ExtensionAPI) {
 			}
 			const dots = DOT_FRAMES[Math.floor(tick / 3) % DOT_FRAMES.length]!;
 			const total = agentStartMs > 0 ? fmtTime(Date.now() - agentStartMs) : "";
-			ctx.ui.setWorkingMessage(
+			setWorkingAndEmit(ctx, 
 				ctxWarn + tpsPrefix +
 				(isRarePhrase
 					? fxRare(thinkingPhrase)
@@ -1402,7 +1418,7 @@ export default function (pi: ExtensionAPI) {
 			narratedStatus = null;
 		}
 		if (narrFresh) {
-				ctx.ui.setWorkingMessage(
+				setWorkingAndEmit(ctx, 
 					ctxWarn +
 						combo +
 						slow +
@@ -1418,7 +1434,7 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			ctx.ui.setWorkingMessage(
+			setWorkingAndEmit(ctx, 
 				ctxWarn + combo + slow + fx(cur.label) + git + progress + eta + secs + more + subHint,
 			);
 	};
@@ -1617,7 +1633,7 @@ export default function (pi: ExtensionAPI) {
 		}
 		accentHex = accentHexOf(ctx);
 		applyFrames(ctx);
-		ctx.ui.setWorkingMessage(undefined);
+		setWorkingAndEmit(ctx, undefined);
 		ctx.ui.setStatus(DONE_STATUS_KEY, undefined);
 	});
 
@@ -1648,7 +1664,7 @@ export default function (pi: ExtensionAPI) {
 		if (wasAborted) {
 			wasAborted = false;
 			if (featureOn("continuePhrases")) {
-				ctx.ui.setWorkingMessage(
+				setWorkingAndEmit(ctx, 
 					ctx.ui.theme.fg("accent", pick(CONTINUE_PHRASES)),
 				);
 				continueUntil = Date.now() + 1500;
@@ -1842,7 +1858,7 @@ export default function (pi: ExtensionAPI) {
 		// 关键词命中用梗，否则保底显示模型名——切模型必有反馈
 		const quip = modelQuip(currentModelId) ?? `换模型了 · ${event.model.id}`;
 		if (busy) {
-			ctx.ui.setWorkingMessage(ctx.ui.theme.fg("accent", quip));
+			setWorkingAndEmit(ctx, ctx.ui.theme.fg("accent", quip));
 			continueUntil = Date.now() + 2500;
 			return;
 		}
@@ -2005,7 +2021,7 @@ export default function (pi: ExtensionAPI) {
 			clearTimeout(modelTimer);
 			modelTimer = null;
 		}
-		ctx.ui.setWorkingMessage(undefined);
+		setWorkingAndEmit(ctx, undefined);
 		ctx.ui.setWorkingIndicator();
 		ctx.ui.setStatus(DONE_STATUS_KEY, undefined);
 		ctx.ui.setStatus(MODEL_STATUS_KEY, undefined);
